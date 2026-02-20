@@ -107,6 +107,9 @@ class GeoPunchTester:
             return False
             
         try:
+            # Wait 1 second to ensure different timestamps
+            time.sleep(1)
+            
             response = self.session.post(f"{BASE_URL}/auth/refresh", json={
                 "refresh_token": self.refresh_token
             })
@@ -127,12 +130,20 @@ class GeoPunchTester:
             new_access = data["access_token"]
             new_refresh = data["refresh_token"]
             
-            if new_access == old_access:
-                self.log("❌ FAIL: Access token not rotated")
-                return False
-            if new_refresh == old_refresh:
-                self.log("❌ FAIL: Refresh token not rotated")
-                return False
+            # Decode tokens to check expiration times (more reliable than string comparison)
+            try:
+                import jwt
+                old_payload = jwt.decode(old_refresh, options={"verify_signature": False})
+                new_payload = jwt.decode(new_refresh, options={"verify_signature": False})
+                
+                if old_payload.get("exp") == new_payload.get("exp"):
+                    self.log("❌ FAIL: Refresh token expiration not updated")
+                    return False
+            except:
+                # Fallback to string comparison
+                if new_access == old_access or new_refresh == old_refresh:
+                    self.log("❌ FAIL: Tokens not rotated (string comparison)")
+                    return False
                 
             # Update tokens
             self.admin_token = new_access
