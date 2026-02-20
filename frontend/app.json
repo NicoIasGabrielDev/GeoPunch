@@ -12,9 +12,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.geopunch.app",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Verificar presença no local de trabalho",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Registo automático de entrada e saída",
-        "NSLocationAlwaysUsageDescription": "Registo automático de entrada e saída",
+        "NSLocationWhenInUseUsageDescription": "GeoPunch precisa da sua localização para verificar presença no local de trabalho e registar ponto.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "GeoPunch precisa de acesso contínuo à localização para notificações automáticas de entrada e saída do trabalho.",
+        "NSLocationAlwaysUsageDescription": "GeoPunch precisa de acesso contínuo à localização para notificações automáticas de entrada e saída do trabalho.",
         "UIBackgroundModes": ["location", "fetch"]
       }
     },
@@ -44,9 +44,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Registo automático de entrada e saída",
-          "locationAlwaysPermission": "Registo automático de entrada e saída",
-          "locationWhenInUsePermission": "Verificar presença no local de trabalho",
+          "locationAlwaysAndWhenInUsePermission": "GeoPunch precisa de acesso contínuo à localização para notificações automáticas de entrada e saída do trabalho.",
+          "locationAlwaysPermission": "GeoPunch precisa de acesso contínuo à localização para notificações automáticas de entrada e saída do trabalho.",
+          "locationWhenInUsePermission": "GeoPunch precisa da sua localização para verificar presença no local de trabalho e registar ponto.",
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true
         }
