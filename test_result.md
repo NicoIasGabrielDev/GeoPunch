@@ -403,3 +403,5 @@ test_plan:
 agent_communication:
   - agent: "main"
     message: "Initial MVP implementation complete. Backend has all endpoints implemented. Frontend has all screens working. Need to test the core punch and break functionality, timesheet calculations, and export features. Admin: admin@geopunch.pt / admin123. Test user: teste@geopunch.pt / teste123. Sample workplace: Escritório Central (38.7223, -9.1393, 150m radius)"
+  - agent: "testing"
+    message: "CRITICAL ISSUE: Comprehensive mobile E2E testing performed on iPhone 14 viewport (390x844). App loads successfully with proper mobile-responsive design and Portuguese localization. However, authentication is completely broken - login attempts with both admin@geopunch.pt/admin123 and teste@geopunch.pt/teste123 fail. Login button clicks but no redirect occurs, staying on /login route. This blocks all further UI testing of home screen, navigation, punch functionality, admin features, etc. Frontend UI components render correctly but backend integration appears non-functional."
