@@ -231,10 +231,66 @@ JWT_REFRESH_SECRET=<another-secret-32-chars>
 
 **Frontend (.env):**
 ```env
-EXPO_PUBLIC_BACKEND_URL=https://api.yourdomaincom
+EXPO_PUBLIC_BACKEND_URL=https://api.yourdomain.com
 ```
 
-### 2. Base de Dados
+### 2. Configuração do Mapa (Google Maps / Apple Maps)
+
+**IMPORTANTE:** O GeoPunch usa `react-native-maps` para o seletor de localização.
+
+#### Android (Google Maps)
+1. Obtenha uma API key do Google Cloud Console:
+   - Ative as APIs: "Maps SDK for Android" e "Geocoding API" (opcional)
+   - Restrinja a key ao package name da app
+
+2. Configure em `app.json`:
+```json
+{
+  "expo": {
+    "android": {
+      "config": {
+        "googleMaps": {
+          "apiKey": "YOUR_GOOGLE_MAPS_API_KEY"
+        }
+      }
+    }
+  }
+}
+```
+
+Ou via variável de ambiente (recomendado para EAS Build):
+```json
+{
+  "expo": {
+    "android": {
+      "config": {
+        "googleMaps": {
+          "apiKey": "${GOOGLE_MAPS_API_KEY}"
+        }
+      }
+    }
+  }
+}
+```
+
+#### iOS (Apple Maps)
+- Não requer configuração adicional - usa Apple Maps nativamente
+- Para usar Google Maps no iOS (opcional), adicione a API key em `ios.config.googleMapsApiKey`
+
+#### Fallback (Sem API Key)
+Se nenhuma API key estiver configurada:
+- O mapa funcionará na versão web com limitações
+- Em dispositivos móveis, será mostrado um fallback com coordenadas manuais
+- A funcionalidade principal (lat/lng) continua a funcionar
+
+#### Limitações
+| Plataforma | Provider | Requer Key | Notas |
+|------------|----------|------------|-------|
+| Android    | Google   | SIM        | Obrigatório para produção |
+| iOS        | Apple    | NÃO        | Funciona nativamente |
+| Web        | -        | -          | Fallback com coords |
+
+### 3. Base de Dados
 
 - [ ] MongoDB configurado e acessível
 - [ ] Índices criados (automático no startup)
