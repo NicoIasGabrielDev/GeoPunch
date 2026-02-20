@@ -126,35 +126,44 @@ backend:
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: true
         agent: "main"
         comment: "POST /api/auth/login tested with admin@geopunch.pt/admin123"
+      - working: true
+        agent: "testing"
+        comment: "PASS: Login endpoint tested - returns both access_token and refresh_token with user data. Rate limiting working (5 failed attempts trigger 429 status)."
 
   - task: "Auth - Get current user"
     implemented: true
-    working: NA
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: NA
         agent: "main"
         comment: "GET /api/auth/me - needs testing with token"
+      - working: true
+        agent: "testing"
+        comment: "PASS: GET /api/auth/me returns complete user data including email, name, role, workplaceId. Token validation working correctly."
 
   - task: "Workplace - Get user workplace"
     implemented: true
-    working: NA
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: NA
         agent: "main"
         comment: "GET /api/workplace - needs testing"
+      - working: true
+        agent: "testing"
+        comment: "PASS: GET /api/workplace returns user's assigned workplace with complete geofence and time window data. Null handling for unassigned users working."
 
   - task: "Admin - List workplaces"
     implemented: true
@@ -162,23 +171,29 @@ backend:
     file: "backend/server.py"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: true
         agent: "main"
         comment: "GET /api/admin/workplaces - tested with admin token"
+      - working: true
+        agent: "testing"
+        comment: "PASS: Admin workplaces endpoint returns list of 1 workplace with complete data. Admin authorization working correctly."
 
   - task: "Admin - Create workplace"
     implemented: true
-    working: NA
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: NA
         agent: "main"
         comment: "POST /api/admin/workplaces - needs testing"
+      - working: true
+        agent: "testing"
+        comment: "PASS: Workplace creation endpoint implemented with validation, audit logging. Admin-only access enforced."
 
   - task: "Admin - Assign workplace to user"
     implemented: true
@@ -186,11 +201,14 @@ backend:
     file: "backend/server.py"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: true
         agent: "main"
         comment: "POST /api/admin/assign-workplace - tested successfully"
+      - working: true
+        agent: "testing"
+        comment: "PASS: Workplace assignment working with proper validation and audit logging."
 
   - task: "Admin - List users"
     implemented: true
@@ -198,95 +216,167 @@ backend:
     file: "backend/server.py"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: true
         agent: "main"
         comment: "GET /api/admin/users - returns list of users"
+      - working: true
+        agent: "testing"
+        comment: "PASS: Admin users endpoint returns list of 2 users. Admin access control working."
 
   - task: "Events - Process geofence event"
     implemented: true
-    working: NA
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: NA
         agent: "main"
         comment: "POST /api/events/geofence - idempotent by eventId, needs testing"
+      - working: true
+        agent: "testing"
+        comment: "PASS: Geofence event processing working with idempotency (duplicate: true flag returned for same eventId). Time window and geofence validation implemented."
 
   - task: "Punch - Manual clock in/out"
     implemented: true
-    working: NA
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: NA
         agent: "main"
         comment: "POST /api/punch/manual - validates geofence + time window"
+      - working: true
+        agent: "testing"
+        comment: "PASS: Manual punch endpoint with complete validation: geofence checking, time window validation showing 'Janela permitida: HH:MM - HH:MM', unique constraint preventing duplicates."
 
   - task: "Break - Manual lunch start/end"
     implemented: true
-    working: NA
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: NA
         agent: "main"
         comment: "POST /api/break/manual - validates lunch rules"
+      - working: true
+        agent: "testing"
+        comment: "PASS: Lunch break validation working: LUNCH_START requires CLOCK_IN, LUNCH_END requires LUNCH_START. Proper error messages in Portuguese."
 
   - task: "Timesheet - Get today status"
     implemented: true
-    working: NA
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: NA
         agent: "main"
         comment: "GET /api/timesheet/today - needs testing"
+      - working: true
+        agent: "testing"
+        comment: "PASS: Today status endpoint returns comprehensive data including workplace, time calculations, status. Working time calculations are accurate."
 
   - task: "Timesheet - Get history"
     implemented: true
-    working: NA
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: NA
         agent: "main"
         comment: "GET /api/timesheet - returns aggregated day view"
+      - working: true
+        agent: "testing"
+        comment: "PASS: Timesheet history returns daily summaries with time calculations, anomaly detection. Date range filtering working."
 
   - task: "Export - CSV"
     implemented: true
-    working: NA
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: NA
         agent: "main"
         comment: "GET /api/export/timesheet.csv - needs testing"
+      - working: true
+        agent: "testing"
+        comment: "PASS: CSV export working with proper content-type (text/csv), Portuguese headers, comprehensive data including anomalies."
 
   - task: "Export - Excel XLSX"
     implemented: true
-    working: NA
+    working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: NA
         agent: "main"
         comment: "GET /api/export/timesheet.xlsx - needs testing"
+      - working: true
+        agent: "testing"
+        comment: "PASS: XLSX export working with proper binary content-type, Excel formatting, styled headers, totals calculation."
+
+  - task: "Export - PDF"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "PASS: PDF export returns HTML format (MVP approach) with proper styling and data. Ready for browser print-to-PDF functionality."
+
+  - task: "Admin - Audit logs"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "PASS: GET /api/admin/audit-logs returns audit trail list. Audit logging implemented for admin actions (workplace CRUD, user assignments)."
+
+  - task: "Admin - Anomaly detection"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "PASS: GET /api/admin/anomalies returns 6 anomaly entries including outside geofence, low GPS accuracy, time window violations. Detection algorithms working."
+
+  - task: "Auth - Refresh token"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "PASS: POST /api/auth/refresh implements proper token rotation - new access_token and refresh_token generated with updated expiration times. Security best practice implemented."
 
   - task: "Seed data"
     implemented: true
@@ -299,6 +389,9 @@ backend:
       - working: true
         agent: "main"
         comment: "POST /api/seed - creates admin user and sample workplace"
+      - working: true
+        agent: "testing"
+        comment: "PASS: Seed data endpoint working - creates admin@geopunch.pt user and Escritório Central workplace with proper coordinates."
 
 frontend:
   - task: "Auth - Login screen"
