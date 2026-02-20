@@ -274,9 +274,22 @@ export default function HomeScreen() {
         
         {!backgroundPermission && Platform.OS !== 'web' && (
           <Text style={styles.permissionHint}>
-            Nota: Sem permissão de segundo plano, o registo automático pode não funcionar quando a app está fechada.
+            Nota: Sem permissão de segundo plano, as notificações de geofence podem não funcionar quando a app está fechada.
           </Text>
         )}
+      </View>
+    );
+  };
+
+  const renderWorkdayWarning = () => {
+    if (isWorkday || !workplace) return null;
+    
+    return (
+      <View style={[styles.warningBox, { backgroundColor: '#fff3cd', marginBottom: 16 }]}>
+        <Ionicons name="information-circle" size={20} color="#856404" />
+        <Text style={[styles.warningText, { color: '#856404' }]}>
+          Hoje não é um dia de trabalho configurado para "{workplace.name}"
+        </Text>
       </View>
     );
   };
@@ -284,71 +297,60 @@ export default function HomeScreen() {
   const renderPunchButtons = () => {
     if (!todayStatus) return null;
 
-    const { status, clockIn, clockOut, lunchStart, lunchEnd } = todayStatus;
+    const { status, punchIn, punchOut, breaks } = todayStatus;
     const withinGeofence = distance !== undefined && workplace && distance <= workplace.radiusMeters;
-    
-    // Get time windows from the enhanced response
-    const clockInWindow = todayStatus.workplace?.clockInWindow;
-    const clockOutWindow = todayStatus.workplace?.clockOutWindow;
+    const hasOpenBreak = breaks?.some(b => b.endedAt === null);
 
     return (
       <View style={styles.buttonsContainer}>
-        {/* Clock In/Out Buttons */}
-        {!clockIn && (
-          <>
-            <Button
-              title="Registar Entrada"
-              onPress={() => handleManualPunch('CLOCK_IN')}
-              loading={actionLoading === 'CLOCK_IN'}
-              disabled={!withinGeofence || !locationPermission}
-              variant="success"
-              style={styles.actionButton}
-            />
-            {clockInWindow && (
-              <Text style={styles.windowHint}>Janela permitida: {clockInWindow}</Text>
-            )}
-          </>
-        )}
-
-        {clockIn && !clockOut && (
-          <>
-            <Button
-              title="Registar Saída"
-              onPress={() => handleManualPunch('CLOCK_OUT')}
-              loading={actionLoading === 'CLOCK_OUT'}
-              disabled={!withinGeofence || !locationPermission}
-              variant="danger"
-              style={styles.actionButton}
-            />
-            {clockOutWindow && (
-              <Text style={styles.windowHint}>Janela permitida: {clockOutWindow}</Text>
-            )}
-          </>
-        )}
-
-        {/* Lunch Buttons */}
-        {clockIn && !clockOut && !lunchStart && (
+        {/* Clock In Button */}
+        {!punchIn && (
           <Button
-            title="Início de Almoço"
-            onPress={() => handleLunchBreak('LUNCH_START')}
-            loading={actionLoading === 'LUNCH_START'}
+            title="Registar Entrada"
+            onPress={() => handleManualPunch('IN')}
+            loading={actionLoading === 'IN'}
+            disabled={!locationPermission}
+            variant="success"
+            style={styles.actionButton}
+          />
+        )}
+
+        {/* Clock Out Button */}
+        {punchIn && !punchOut && (
+          <Button
+            title="Registar Saída"
+            onPress={() => handleManualPunch('OUT')}
+            loading={actionLoading === 'OUT'}
+            disabled={!locationPermission || hasOpenBreak}
+            variant="danger"
+            style={styles.actionButton}
+          />
+        )}
+
+        {/* Break Buttons */}
+        {punchIn && !punchOut && !hasOpenBreak && (
+          <Button
+            title="Iniciar Pausa"
+            onPress={() => handleBreak('BREAK_START')}
+            loading={actionLoading === 'BREAK_START'}
             disabled={!locationPermission}
             variant="secondary"
             style={styles.actionButton}
           />
         )}
 
-        {clockIn && !clockOut && lunchStart && !lunchEnd && (
+        {punchIn && !punchOut && hasOpenBreak && (
           <Button
-            title="Fim de Almoço"
-            onPress={() => handleLunchBreak('LUNCH_END')}
-            loading={actionLoading === 'LUNCH_END'}
+            title="Terminar Pausa"
+            onPress={() => handleBreak('BREAK_END')}
+            loading={actionLoading === 'BREAK_END'}
             disabled={!locationPermission}
             variant="secondary"
             style={styles.actionButton}
           />
         )}
 
+        {/* Location warnings */}
         {!withinGeofence && workplace && locationPermission && (
           <View style={styles.warningBox}>
             <Ionicons name="warning" size={20} color="#ffc107" />
@@ -370,15 +372,21 @@ export default function HomeScreen() {
     );
   };
 
-  if (!user?.workplaceId && !loading) {
+  // No active workplace - prompt to configure
+  if (!workplace && !loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.noWorkplaceContainer}>
-          <Ionicons name="business" size={64} color="#ccc" />
+          <Ionicons name="business-outline" size={64} color="#ccc" />
           <Text style={styles.noWorkplaceTitle}>Sem Local de Trabalho</Text>
           <Text style={styles.noWorkplaceText}>
-            Contacte o administrador para que lhe seja atribuído um local de trabalho.
+            Configure um local de trabalho para começar a registar ponto.
           </Text>
+          <Button
+            title="Configurar Local"
+            onPress={() => router.push('/(tabs)/workplaces')}
+            style={{ marginTop: 20 }}
+          />
         </View>
       </SafeAreaView>
     );
