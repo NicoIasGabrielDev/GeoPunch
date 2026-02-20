@@ -578,6 +578,50 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontStyle: 'italic',
   },
+  workplaceCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  workplaceCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  workplaceIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#e3f2fd',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  workplaceInfo: {
+    flex: 1,
+  },
+  workplaceLabel: {
+    fontSize: 12,
+    color: '#999',
+    textTransform: 'uppercase',
+    fontWeight: '600',
+  },
+  workplaceName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginTop: 2,
+  },
+  workplaceSchedule: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
+  },
   detailsCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -614,22 +658,15 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     flex: 1,
   },
-  methodTag: {
+  outsideTag: {
     fontSize: 12,
-    color: '#999',
+    color: '#dc3545',
     fontStyle: 'italic',
   },
   buttonsContainer: {
     marginTop: 20,
   },
   actionButton: {
-    marginBottom: 12,
-  },
-  windowHint: {
-    fontSize: 12,
-    color: '#666',
-    textAlign: 'center',
-    marginTop: -8,
     marginBottom: 12,
   },
   warningBox: {
