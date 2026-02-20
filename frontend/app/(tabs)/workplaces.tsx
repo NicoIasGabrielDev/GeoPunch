@@ -263,65 +263,41 @@ export default function WorkplacesScreen() {
             </Text>
             
             <View style={styles.mapContainer}>
-              {Platform.OS === 'web' ? (
-                <View style={styles.webMapFallback}>
-                  <Ionicons name="map" size={48} color="#1a73e8" />
-                  <Text style={styles.webMapText}>Mapa não disponível na web</Text>
-                  <Text style={styles.webMapCoords}>
-                    {wizardData.latitude?.toFixed(6) || userLocation?.latitude.toFixed(6)},{' '}
-                    {wizardData.longitude?.toFixed(6) || userLocation?.longitude.toFixed(6)}
-                  </Text>
-                  <Button
-                    title="Usar localização atual"
-                    onPress={() => {
-                      if (userLocation) {
-                        setWizardData(prev => ({
-                          ...prev,
-                          latitude: userLocation.latitude,
-                          longitude: userLocation.longitude
-                        }));
-                      }
-                    }}
-                    variant="outline"
-                    size="small"
-                    style={{ marginTop: 16 }}
-                  />
-                </View>
-              ) : (
-                <MapView
-                  style={styles.map}
-                  region={mapRegion}
-                  onRegionChangeComplete={handleMapRegionChange}
-                  showsUserLocation
-                  showsMyLocationButton
-                >
-                  {wizardData.latitude && wizardData.longitude && (
-                    <>
-                      <Marker
-                        coordinate={{
-                          latitude: wizardData.latitude,
-                          longitude: wizardData.longitude,
-                        }}
-                        draggable={!editingWorkplace}
-                        onDragEnd={(e) => {
-                          const { latitude, longitude } = e.nativeEvent.coordinate;
-                          setWizardData(prev => ({ ...prev, latitude, longitude }));
-                        }}
-                      />
-                      <Circle
-                        center={{
-                          latitude: wizardData.latitude,
-                          longitude: wizardData.longitude,
-                        }}
-                        radius={wizardData.radiusMeters}
-                        fillColor="rgba(26, 115, 232, 0.2)"
-                        strokeColor="rgba(26, 115, 232, 0.8)"
-                        strokeWidth={2}
-                      />
-                    </>
-                  )}
-                </MapView>
-              )}
+              {/* Web fallback - Map not available on web */}
+              <View style={styles.webMapFallback}>
+                <Ionicons name="map" size={48} color="#1a73e8" />
+                <Text style={styles.webMapText}>
+                  {Platform.OS === 'web' 
+                    ? 'Mapa não disponível na web' 
+                    : 'A carregar mapa...'
+                  }
+                </Text>
+                <Text style={styles.webMapCoords}>
+                  {wizardData.latitude?.toFixed(6) || userLocation?.latitude?.toFixed(6) || '0.000000'},{' '}
+                  {wizardData.longitude?.toFixed(6) || userLocation?.longitude?.toFixed(6) || '0.000000'}
+                </Text>
+                <Button
+                  title="Usar localização atual"
+                  onPress={() => {
+                    if (userLocation) {
+                      setWizardData(prev => ({
+                        ...prev,
+                        latitude: userLocation.latitude,
+                        longitude: userLocation.longitude
+                      }));
+                    }
+                  }}
+                  variant="outline"
+                  size="small"
+                  style={{ marginTop: 16 }}
+                />
+                <Text style={styles.hintText}>
+                  {Platform.OS === 'web' 
+                    ? 'Use a aplicação móvel para selecionar no mapa'
+                    : 'Toque no botão acima para usar a sua localização'
+                  }
+                </Text>
+              </View>
               
               {/* Center pin indicator */}
               <View style={styles.centerPin}>
