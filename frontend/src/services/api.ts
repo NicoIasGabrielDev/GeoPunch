@@ -9,6 +9,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 30000,
 });
 
 // Token storage functions
@@ -35,12 +36,37 @@ export const setToken = async (token: string): Promise<void> => {
   }
 };
 
+export const getRefreshToken = async (): Promise<string | null> => {
+  try {
+    if (Platform.OS === 'web') {
+      return localStorage.getItem('refresh_token');
+    }
+    return await SecureStore.getItemAsync('refresh_token');
+  } catch {
+    return null;
+  }
+};
+
+export const setRefreshToken = async (token: string): Promise<void> => {
+  try {
+    if (Platform.OS === 'web') {
+      localStorage.setItem('refresh_token', token);
+    } else {
+      await SecureStore.setItemAsync('refresh_token', token);
+    }
+  } catch (error) {
+    console.error('Error saving refresh token:', error);
+  }
+};
+
 export const removeToken = async (): Promise<void> => {
   try {
     if (Platform.OS === 'web') {
       localStorage.removeItem('auth_token');
+      localStorage.removeItem('refresh_token');
     } else {
       await SecureStore.deleteItemAsync('auth_token');
+      await SecureStore.deleteItemAsync('refresh_token');
     }
   } catch (error) {
     console.error('Error removing token:', error);
@@ -57,6 +83,41 @@ api.interceptors.request.use(
     return config;
   },
   (error) => Promise.reject(error)
+);
+
+// Response interceptor to handle token refresh
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    
+    // If 401 and not already retried, try to refresh token
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+      
+      try {
+        const refreshToken = await getRefreshToken();
+        if (refreshToken) {
+          const response = await axios.post(`${API_URL}/api/auth/refresh`, {
+            refresh_token: refreshToken
+          });
+          
+          const { access_token, refresh_token: newRefreshToken } = response.data;
+          await setToken(access_token);
+          await setRefreshToken(newRefreshToken);
+          
+          originalRequest.headers.Authorization = `Bearer ${access_token}`;
+          return api(originalRequest);
+        }
+      } catch (refreshError) {
+        // Refresh failed, remove tokens
+        await removeToken();
+        return Promise.reject(refreshError);
+      }
+    }
+    
+    return Promise.reject(error);
+  }
 );
 
 // Auth endpoints
