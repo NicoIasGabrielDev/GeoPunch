@@ -147,8 +147,6 @@ export default function HomeScreen() {
       }
     }
   };
-    }
-  };
 
   const updateLocation = async () => {
     const location = await getCurrentLocation();
