@@ -89,9 +89,32 @@ export default function WorkplacesScreen() {
           latitudeDelta: 0.01,
           longitudeDelta: 0.01,
         });
+      } else {
+        // Fallback to Lisbon, Portugal coordinates
+        const defaultLocation = {
+          latitude: 38.7223,
+          longitude: -9.1393,
+        };
+        setUserLocation(defaultLocation);
+        setMapRegion({
+          ...defaultLocation,
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        });
       }
     } catch (error) {
       console.error('Error getting location:', error);
+      // Fallback to Lisbon, Portugal coordinates on error
+      const defaultLocation = {
+        latitude: 38.7223,
+        longitude: -9.1393,
+      };
+      setUserLocation(defaultLocation);
+      setMapRegion({
+        ...defaultLocation,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      });
     }
   };
 
