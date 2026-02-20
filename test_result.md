@@ -101,3 +101,305 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "GeoPunch - Employee time tracking mobile app with geofencing (automatic punch in/out by location), manual lunch break punches and data export. Features: Auth, Workplace setup, Geofencing auto punch, Manual punch fallback, Lunch break, History, Export (CSV + XLSX), Admin panel"
+
+backend:
+  - task: "Auth - Register endpoint"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/auth/register tested via curl - returns JWT token and user data"
+
+  - task: "Auth - Login endpoint"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/auth/login tested with admin@geopunch.pt/admin123"
+
+  - task: "Auth - Get current user"
+    implemented: true
+    working: NA
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: NA
+        agent: "main"
+        comment: "GET /api/auth/me - needs testing with token"
+
+  - task: "Workplace - Get user workplace"
+    implemented: true
+    working: NA
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: NA
+        agent: "main"
+        comment: "GET /api/workplace - needs testing"
+
+  - task: "Admin - List workplaces"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "GET /api/admin/workplaces - tested with admin token"
+
+  - task: "Admin - Create workplace"
+    implemented: true
+    working: NA
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: NA
+        agent: "main"
+        comment: "POST /api/admin/workplaces - needs testing"
+
+  - task: "Admin - Assign workplace to user"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/admin/assign-workplace - tested successfully"
+
+  - task: "Admin - List users"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "GET /api/admin/users - returns list of users"
+
+  - task: "Events - Process geofence event"
+    implemented: true
+    working: NA
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: NA
+        agent: "main"
+        comment: "POST /api/events/geofence - idempotent by eventId, needs testing"
+
+  - task: "Punch - Manual clock in/out"
+    implemented: true
+    working: NA
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: NA
+        agent: "main"
+        comment: "POST /api/punch/manual - validates geofence + time window"
+
+  - task: "Break - Manual lunch start/end"
+    implemented: true
+    working: NA
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: NA
+        agent: "main"
+        comment: "POST /api/break/manual - validates lunch rules"
+
+  - task: "Timesheet - Get today status"
+    implemented: true
+    working: NA
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: NA
+        agent: "main"
+        comment: "GET /api/timesheet/today - needs testing"
+
+  - task: "Timesheet - Get history"
+    implemented: true
+    working: NA
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: NA
+        agent: "main"
+        comment: "GET /api/timesheet - returns aggregated day view"
+
+  - task: "Export - CSV"
+    implemented: true
+    working: NA
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: NA
+        agent: "main"
+        comment: "GET /api/export/timesheet.csv - needs testing"
+
+  - task: "Export - Excel XLSX"
+    implemented: true
+    working: NA
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: NA
+        agent: "main"
+        comment: "GET /api/export/timesheet.xlsx - needs testing"
+
+  - task: "Seed data"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/seed - creates admin user and sample workplace"
+
+frontend:
+  - task: "Auth - Login screen"
+    implemented: true
+    working: true
+    file: "frontend/app/(auth)/login.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Tested via screenshot - login form works, redirects to home"
+
+  - task: "Auth - Register screen"
+    implemented: true
+    working: true
+    file: "frontend/app/(auth)/register.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Tested via screenshot - registration form displays correctly"
+
+  - task: "Home - Today status"
+    implemented: true
+    working: true
+    file: "frontend/app/(tabs)/index.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Shows status card, workplace name, punch buttons, location permission request"
+
+  - task: "History screen"
+    implemented: true
+    working: true
+    file: "frontend/app/(tabs)/history.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Shows 'Sem registos' when empty, correct layout"
+
+  - task: "Export screen"
+    implemented: true
+    working: true
+    file: "frontend/app/(tabs)/export.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Shows date range picker, quick buttons, CSV/XLSX export options"
+
+  - task: "Admin - Workplace management"
+    implemented: true
+    working: true
+    file: "frontend/app/(tabs)/admin.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Shows workplaces and users, can edit/delete/assign"
+
+  - task: "Profile screen"
+    implemented: true
+    working: NA
+    file: "frontend/app/(tabs)/profile.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: NA
+        agent: "main"
+        comment: "Implemented, navigation needs verification"
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 1
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Events - Process geofence event"
+    - "Punch - Manual clock in/out"
+    - "Break - Manual lunch start/end"
+    - "Timesheet - Get today status"
+    - "Export - CSV"
+    - "Export - Excel XLSX"
+  stuck_tasks: []
+  test_all: true
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: "Initial MVP implementation complete. Backend has all endpoints implemented. Frontend has all screens working. Need to test the core punch and break functionality, timesheet calculations, and export features. Admin: admin@geopunch.pt / admin123. Test user: teste@geopunch.pt / teste123. Sample workplace: Escritório Central (38.7223, -9.1393, 150m radius)"
