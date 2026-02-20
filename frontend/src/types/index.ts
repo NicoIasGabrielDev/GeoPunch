@@ -4,8 +4,24 @@ export interface User {
   name: string;
   employeeId?: string;
   role: string;
-  workplaceId?: string;
+  activeWorkplaceId?: string;
   createdAt: string;
+}
+
+export interface WorkdaysConfig {
+  monday: boolean;
+  tuesday: boolean;
+  wednesday: boolean;
+  thursday: boolean;
+  friday: boolean;
+  saturday: boolean;
+  sunday: boolean;
+}
+
+export interface ScheduleConfig {
+  startTime: string;
+  endTime: string;
+  marginMinutes: number;
 }
 
 export interface Workplace {
@@ -14,42 +30,73 @@ export interface Workplace {
   latitude: number;
   longitude: number;
   radiusMeters: number;
-  startTime: string;
-  endTime: string;
-  allowedMarginMinutes: number;
+  workdays: WorkdaysConfig;
+  schedule?: ScheduleConfig;
+  locationLocked: boolean;
+  configuredAt: string;
+  isActive: boolean;
   createdAt: string;
 }
 
 export interface TodayStatus {
   date: string;
-  workplace: Workplace | null;
-  clockIn: string | null;
-  clockInMethod: string | null;
-  clockOut: string | null;
-  clockOutMethod: string | null;
-  lunchStart: string | null;
-  lunchEnd: string | null;
+  isScheduledWorkday: boolean;
+  workplace: {
+    id: string;
+    name: string;
+    latitude: number;
+    longitude: number;
+    radiusMeters: number;
+    workdays: WorkdaysConfig;
+    schedule?: ScheduleConfig;
+    mapsLink: string;
+  } | null;
+  punchIn: {
+    occurredAt: string;
+    method: string;
+    outsideWorkplace: boolean;
+  } | null;
+  punchOut: {
+    occurredAt: string;
+    method: string;
+    outsideWorkplace: boolean;
+  } | null;
+  breaks: Array<{
+    startedAt: string;
+    endedAt: string | null;
+    durationMinutes: number;
+  }>;
   grossMinutes: number;
   breakMinutes: number;
   netWorkedMinutes: number;
   netWorkedFormatted: string;
-  status: 'not_started' | 'working' | 'on_lunch' | 'finished';
+  status: 'not_started' | 'working' | 'on_break' | 'finished';
+}
+
+export interface Punch {
+  id: string;
+  type: string;
+  occurredAt: string;
+  method: string;
+  outsideWorkplace: boolean;
+  distance: number;
+  accuracy: number;
+  note?: string;
+  mapsLink: string;
 }
 
 export interface DayTimesheet {
   date: string;
   workplaceName: string;
-  clockIn: string | null;
-  clockInMethod: string | null;
-  clockOut: string | null;
-  clockOutMethod: string | null;
-  lunchStart: string | null;
-  lunchEnd: string | null;
+  workplaceId: string;
+  isScheduledWorkday: boolean;
+  punches: Punch[];
   grossMinutes: number;
   breakMinutes: number;
   netWorkedMinutes: number;
   netWorkedFormatted: string;
   status: string;
+  anomalies: string[];
 }
 
 export interface LocationData {
@@ -64,5 +111,11 @@ export interface GeofenceEvent {
   latitude: number;
   longitude: number;
   accuracy: number;
-  timestamp?: string;
+  deviceTime?: string;
+}
+
+export interface GeofenceSuggestion {
+  action: 'START_SHIFT' | 'END_SHIFT';
+  message: string;
+  options?: string[];
 }
