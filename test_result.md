@@ -300,15 +300,18 @@ backend:
 frontend:
   - task: "Auth - Login screen"
     implemented: true
-    working: true
+    working: false
     file: "frontend/app/(auth)/login.tsx"
-    stuck_count: 0
+    stuck_count: 1
     priority: "high"
     needs_retesting: false
     status_history:
       - working: true
         agent: "main"
         comment: "Tested via screenshot - login form works, redirects to home"
+      - working: false
+        agent: "testing"
+        comment: "CRITICAL: Login functionality completely broken. Mobile E2E testing shows login form renders correctly with proper Portuguese localization, credentials can be entered, but login button click fails to authenticate or redirect. Tested with both admin@geopunch.pt/admin123 and teste@geopunch.pt/teste123 - both fail. Backend logs show successful login API calls (200 OK), suggesting frontend-backend integration issue or token handling problem."
 
   - task: "Auth - Register screen"
     implemented: true
@@ -321,66 +324,84 @@ frontend:
       - working: true
         agent: "main"
         comment: "Tested via screenshot - registration form displays correctly"
+      - working: true
+        agent: "testing"
+        comment: "Registration screen accessible via 'Registar' link. Form fields render correctly: Nome Completo, Email, Senha, Confirmar Senha. Mobile responsive design working."
 
   - task: "Home - Today status"
     implemented: true
-    working: true
+    working: "NA"
     file: "frontend/app/(tabs)/index.tsx"
-    stuck_count: 0
+    stuck_count: 1
     priority: "high"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
       - working: true
         agent: "main"
         comment: "Shows status card, workplace name, punch buttons, location permission request"
+      - working: "NA"
+        agent: "testing"
+        comment: "Cannot test - blocked by login authentication failure. Home screen functionality requires successful login to access."
 
   - task: "History screen"
     implemented: true
-    working: true
+    working: "NA"
     file: "frontend/app/(tabs)/history.tsx"
-    stuck_count: 0
+    stuck_count: 1
     priority: "high"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
       - working: true
         agent: "main"
         comment: "Shows 'Sem registos' when empty, correct layout"
+      - working: "NA"
+        agent: "testing"
+        comment: "Cannot test - blocked by login authentication failure. Tab navigation and history functionality require authentication."
 
   - task: "Export screen"
     implemented: true
-    working: true
+    working: "NA"
     file: "frontend/app/(tabs)/export.tsx"
-    stuck_count: 0
+    stuck_count: 1
     priority: "high"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
       - working: true
         agent: "main"
         comment: "Shows date range picker, quick buttons, CSV/XLSX export options"
+      - working: "NA"
+        agent: "testing"
+        comment: "Cannot test - blocked by login authentication failure. Export functionality requires authenticated user access."
 
   - task: "Admin - Workplace management"
     implemented: true
-    working: true
+    working: "NA"
     file: "frontend/app/(tabs)/admin.tsx"
-    stuck_count: 0
+    stuck_count: 1
     priority: "medium"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
       - working: true
         agent: "main"
         comment: "Shows workplaces and users, can edit/delete/assign"
+      - working: "NA"
+        agent: "testing"
+        comment: "Cannot test - blocked by login authentication failure. Admin functionality requires authenticated admin user access."
 
   - task: "Profile screen"
     implemented: true
-    working: NA
+    working: "NA"
     file: "frontend/app/(tabs)/profile.tsx"
-    stuck_count: 0
+    stuck_count: 1
     priority: "medium"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
-      - working: NA
+      - working: true
         agent: "main"
         comment: "Implemented, navigation needs verification"
+      - working: "NA"
+        agent: "testing"
+        comment: "Cannot test - blocked by login authentication failure. Profile and logout functionality require authenticated user access."
 
 metadata:
   created_by: "main_agent"
