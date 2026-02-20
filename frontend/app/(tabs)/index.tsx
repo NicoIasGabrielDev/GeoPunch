@@ -24,9 +24,16 @@ import {
   generateEventId,
 } from '../../src/utils/location';
 
+interface TodayStatusExtended extends TodayStatus {
+  workplace?: {
+    clockInWindow?: string;
+    clockOutWindow?: string;
+  } & Workplace | null;
+}
+
 export default function HomeScreen() {
   const { user, refreshUser } = useAuth();
-  const [todayStatus, setTodayStatus] = useState<TodayStatus | null>(null);
+  const [todayStatus, setTodayStatus] = useState<TodayStatusExtended | null>(null);
   const [workplace, setWorkplace] = useState<Workplace | null>(null);
   const [currentLocation, setCurrentLocation] = useState<LocationData | null>(null);
   const [distance, setDistance] = useState<number | undefined>(undefined);
@@ -34,6 +41,7 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [locationPermission, setLocationPermission] = useState<boolean>(false);
+  const [backgroundPermission, setBackgroundPermission] = useState<boolean>(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -58,10 +66,31 @@ export default function HomeScreen() {
   }, [currentLocation, workplace]);
 
   const setupLocation = async () => {
+    try {
+      const { status: foregroundStatus } = await Location.getForegroundPermissionsAsync();
+      setLocationPermission(foregroundStatus === 'granted');
+      
+      if (Platform.OS !== 'web') {
+        const { status: backgroundStatus } = await Location.getBackgroundPermissionsAsync();
+        setBackgroundPermission(backgroundStatus === 'granted');
+      } else {
+        setBackgroundPermission(true); // Not applicable on web
+      }
+      
+      if (foregroundStatus === 'granted') {
+        updateLocation();
+      }
+    } catch (error) {
+      console.error('Error checking permissions:', error);
+    }
+  };
+
+  const requestPermissions = async () => {
     const granted = await requestLocationPermissions();
     setLocationPermission(granted);
     if (granted) {
       updateLocation();
+      await setupLocation(); // Re-check background permission
     }
   };
 
@@ -102,14 +131,14 @@ export default function HomeScreen() {
 
   const handleManualPunch = async (punchType: 'CLOCK_IN' | 'CLOCK_OUT') => {
     if (!currentLocation) {
-      Alert.alert('Erro', 'Não foi possível obter a sua localização');
+      Alert.alert('Erro', 'Não foi possível obter a sua localização. Por favor, ative a localização.');
       return;
     }
 
     if (currentLocation.accuracy > 50) {
       Alert.alert(
         'Precisão GPS baixa',
-        `A precisão atual é de ${Math.round(currentLocation.accuracy)}m. Deseja continuar?`,
+        `A precisão atual é de ${Math.round(currentLocation.accuracy)}m. O registo pode ser impreciso. Deseja continuar?`,
         [
           { text: 'Cancelar', style: 'cancel' },
           { text: 'Continuar', onPress: () => executePunch(punchType) },
@@ -164,35 +193,101 @@ export default function HomeScreen() {
     }
   };
 
+  const renderPermissionDiagnostics = () => {
+    if (locationPermission && backgroundPermission) return null;
+    
+    return (
+      <View style={styles.diagnosticsCard}>
+        <View style={styles.diagnosticsHeader}>
+          <Ionicons name="settings-outline" size={24} color="#1a73e8" />
+          <Text style={styles.diagnosticsTitle}>Diagnóstico de Permissões</Text>
+        </View>
+        
+        <View style={styles.permissionRow}>
+          <Ionicons 
+            name={locationPermission ? "checkmark-circle" : "close-circle"} 
+            size={20} 
+            color={locationPermission ? "#28a745" : "#dc3545"} 
+          />
+          <Text style={styles.permissionText}>
+            Localização em primeiro plano: {locationPermission ? "Ativa" : "Inativa"}
+          </Text>
+        </View>
+        
+        {Platform.OS !== 'web' && (
+          <View style={styles.permissionRow}>
+            <Ionicons 
+              name={backgroundPermission ? "checkmark-circle" : "close-circle"} 
+              size={20} 
+              color={backgroundPermission ? "#28a745" : "#ffc107"} 
+            />
+            <Text style={styles.permissionText}>
+              Localização em segundo plano: {backgroundPermission ? "Ativa" : "Limitada"}
+            </Text>
+          </View>
+        )}
+        
+        {!locationPermission && (
+          <Button
+            title="Ativar Localização"
+            onPress={requestPermissions}
+            size="small"
+            style={{ marginTop: 12 }}
+          />
+        )}
+        
+        {!backgroundPermission && Platform.OS !== 'web' && (
+          <Text style={styles.permissionHint}>
+            Nota: Sem permissão de segundo plano, o registo automático pode não funcionar quando a app está fechada.
+          </Text>
+        )}
+      </View>
+    );
+  };
+
   const renderPunchButtons = () => {
     if (!todayStatus) return null;
 
     const { status, clockIn, clockOut, lunchStart, lunchEnd } = todayStatus;
     const withinGeofence = distance !== undefined && workplace && distance <= workplace.radiusMeters;
+    
+    // Get time windows from the enhanced response
+    const clockInWindow = todayStatus.workplace?.clockInWindow;
+    const clockOutWindow = todayStatus.workplace?.clockOutWindow;
 
     return (
       <View style={styles.buttonsContainer}>
         {/* Clock In/Out Buttons */}
         {!clockIn && (
-          <Button
-            title="Registar Entrada"
-            onPress={() => handleManualPunch('CLOCK_IN')}
-            loading={actionLoading === 'CLOCK_IN'}
-            disabled={!withinGeofence}
-            variant="success"
-            style={styles.actionButton}
-          />
+          <>
+            <Button
+              title="Registar Entrada"
+              onPress={() => handleManualPunch('CLOCK_IN')}
+              loading={actionLoading === 'CLOCK_IN'}
+              disabled={!withinGeofence || !locationPermission}
+              variant="success"
+              style={styles.actionButton}
+            />
+            {clockInWindow && (
+              <Text style={styles.windowHint}>Janela permitida: {clockInWindow}</Text>
+            )}
+          </>
         )}
 
         {clockIn && !clockOut && (
-          <Button
-            title="Registar Saída"
-            onPress={() => handleManualPunch('CLOCK_OUT')}
-            loading={actionLoading === 'CLOCK_OUT'}
-            disabled={!withinGeofence}
-            variant="danger"
-            style={styles.actionButton}
-          />
+          <>
+            <Button
+              title="Registar Saída"
+              onPress={() => handleManualPunch('CLOCK_OUT')}
+              loading={actionLoading === 'CLOCK_OUT'}
+              disabled={!withinGeofence || !locationPermission}
+              variant="danger"
+              style={styles.actionButton}
+            />
+            {clockOutWindow && (
+              <Text style={styles.windowHint}>Janela permitida: {clockOutWindow}</Text>
+            )}
+          </>
         )}
 
         {/* Lunch Buttons */}
@@ -201,6 +296,7 @@ export default function HomeScreen() {
             title="Início de Almoço"
             onPress={() => handleLunchBreak('LUNCH_START')}
             loading={actionLoading === 'LUNCH_START'}
+            disabled={!locationPermission}
             variant="secondary"
             style={styles.actionButton}
           />
@@ -211,16 +307,26 @@ export default function HomeScreen() {
             title="Fim de Almoço"
             onPress={() => handleLunchBreak('LUNCH_END')}
             loading={actionLoading === 'LUNCH_END'}
+            disabled={!locationPermission}
             variant="secondary"
             style={styles.actionButton}
           />
         )}
 
-        {!withinGeofence && workplace && (
+        {!withinGeofence && workplace && locationPermission && (
           <View style={styles.warningBox}>
             <Ionicons name="warning" size={20} color="#ffc107" />
             <Text style={styles.warningText}>
-              Está fora da área do local de trabalho ({Math.round(distance || 0)}m de distância)
+              Está fora da área do local de trabalho ({Math.round(distance || 0)}m de distância, máximo {workplace.radiusMeters}m)
+            </Text>
+          </View>
+        )}
+        
+        {currentLocation && currentLocation.accuracy > 30 && (
+          <View style={[styles.warningBox, { backgroundColor: '#e3f2fd' }]}>
+            <Ionicons name="locate" size={20} color="#1a73e8" />
+            <Text style={[styles.warningText, { color: '#1a73e8' }]}>
+              Precisão GPS: {Math.round(currentLocation.accuracy)}m
             </Text>
           </View>
         )}
@@ -262,20 +368,7 @@ export default function HomeScreen() {
           </Text>
         </View>
 
-        {!locationPermission && (
-          <View style={styles.permissionWarning}>
-            <Ionicons name="location-outline" size={24} color="#dc3545" />
-            <Text style={styles.permissionText}>
-              Permissão de localização necessária para o funcionamento da app
-            </Text>
-            <Button
-              title="Ativar"
-              onPress={setupLocation}
-              size="small"
-              style={{ marginTop: 8 }}
-            />
-          </View>
-        )}
+        {renderPermissionDiagnostics()}
 
         {todayStatus && (
           <StatusCard
@@ -388,18 +481,45 @@ const styles = StyleSheet.create({
     marginTop: 4,
     textTransform: 'capitalize',
   },
-  permissionWarning: {
-    backgroundColor: '#fff3cd',
+  diagnosticsCard: {
+    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
     marginBottom: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#1a73e8',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  diagnosticsHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 12,
+  },
+  diagnosticsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginLeft: 8,
+  },
+  permissionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
   },
   permissionText: {
-    color: '#856404',
-    textAlign: 'center',
-    marginTop: 8,
     fontSize: 14,
+    color: '#666',
+    marginLeft: 8,
+  },
+  permissionHint: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 8,
+    fontStyle: 'italic',
   },
   detailsCard: {
     backgroundColor: '#fff',
@@ -446,6 +566,13 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   actionButton: {
+    marginBottom: 12,
+  },
+  windowHint: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: -8,
     marginBottom: 12,
   },
   warningBox: {
