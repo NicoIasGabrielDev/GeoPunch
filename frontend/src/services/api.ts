@@ -136,6 +136,16 @@ export const workplaceApi = {
   getActive: () => api.get('/workplaces/active'),
   // Legacy
   getUserWorkplace: () => api.get('/workplace'),
+  // Admin endpoints (legacy - kept for backwards compatibility)
+  listAll: () => api.get('/admin/workplaces'),
+  delete: (id: string) => api.delete(`/admin/workplaces/${id}`),
+  assignToUser: (userId: string, workplaceId: string) => 
+    api.post('/admin/assign-workplace', { user_id: userId, workplace_id: workplaceId }),
+};
+
+// Users endpoints (admin)
+export const usersApi = {
+  list: () => api.get('/admin/users'),
 };
 
 // Punch endpoints
