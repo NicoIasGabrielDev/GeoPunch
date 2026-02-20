@@ -2,10 +2,15 @@ import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
-const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://geofence-assist.preview.emergentagent.com';
+// Use environment variable - required for deployment
+const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+
+if (!API_URL) {
+  console.warn('EXPO_PUBLIC_BACKEND_URL not set - API calls may fail');
+}
 
 const api = axios.create({
-  baseURL: `${API_URL}/api`,
+  baseURL: `${API_URL || ''}/api`,
   headers: {
     'Content-Type': 'application/json',
   },
