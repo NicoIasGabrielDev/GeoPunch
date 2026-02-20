@@ -20,18 +20,6 @@ import { Button } from '../../src/components/Button';
 import { Input } from '../../src/components/Input';
 import { Workplace, WorkdaysConfig } from '../../src/types';
 
-// Conditional import for react-native-maps (not available on web)
-let MapView: any = null;
-let Marker: any = null;
-let Circle: any = null;
-
-if (Platform.OS !== 'web') {
-  const Maps = require('react-native-maps');
-  MapView = Maps.default;
-  Marker = Maps.Marker;
-  Circle = Maps.Circle;
-}
-
 const { width, height } = Dimensions.get('window');
 
 interface WizardData {
