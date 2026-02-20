@@ -7,13 +7,14 @@ import {
   RefreshControl,
   Alert,
   Platform,
+  TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { timesheetApi, eventsApi, workplaceApi } from '../../src/services/api';
+import { timesheetApi, punchApi, workplaceApi } from '../../src/services/api';
 import { StatusCard } from '../../src/components/StatusCard';
 import { Button } from '../../src/components/Button';
 import { TodayStatus, Workplace, LocationData } from '../../src/types';
@@ -21,7 +22,6 @@ import {
   calculateDistance,
   requestLocationPermissions,
   getCurrentLocation,
-  generateEventId,
 } from '../../src/utils/location';
 
 interface TodayStatusExtended extends TodayStatus {
