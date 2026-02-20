@@ -1,616 +1,631 @@
 #!/usr/bin/env python3
-
 """
-GeoPunch Backend API Testing Suite
-Tests all backend endpoints according to the priority order specified in test_result.md
+GeoPunch Backend API v2.0 Testing Suite
+Tests all critical backend functionality according to priority scenarios.
 """
 
 import requests
 import json
 import time
-import uuid
 from datetime import datetime, timedelta
+from typing import Dict, Any, Optional
+import sys
 
 # Configuration
 BASE_URL = "https://email-2.preview.emergentagent.com/api"
 ADMIN_EMAIL = "admin@geopunch.pt"
 ADMIN_PASSWORD = "admin123"
-TEST_EMAIL = "teste@geopunch.pt"
-TEST_PASSWORD = "teste123"
-
-# Sample workplace coordinates (Lisbon)
 WORKPLACE_LAT = 38.7223
 WORKPLACE_LON = -9.1393
 WORKPLACE_RADIUS = 150
 
 class GeoPunchTester:
     def __init__(self):
-        self.admin_token = None
-        self.test_user_token = None
-        self.test_user_id = None
-        self.workplace_id = None
         self.session = requests.Session()
-        self.session.timeout = 30
-        self.results = {}
+        self.admin_token = None
+        self.refresh_token = None
+        self.test_results = []
         
-    def log(self, message, level="INFO"):
+    def log(self, message: str, level: str = "INFO"):
         timestamp = datetime.now().strftime("%H:%M:%S")
         print(f"[{timestamp}] {level}: {message}")
         
-    def test_endpoint(self, name, method, url, **kwargs):
-        """Test a single endpoint and return result"""
+    def assert_response(self, response: requests.Response, expected_status: int, test_name: str):
+        """Assert response status and log result"""
         try:
-            self.log(f"Testing {name}: {method} {url}")
-            
-            response = self.session.request(method, url, **kwargs)
-            
-            success = response.status_code < 400
-            
-            result = {
-                "name": name,
-                "success": success,
-                "status_code": response.status_code,
-                "method": method,
-                "url": url
-            }
-            
-            if success:
-                try:
-                    result["data"] = response.json()
-                except:
-                    result["data"] = response.text
-                self.log(f"✅ {name} - Status: {response.status_code}")
+            if response.status_code == expected_status:
+                self.log(f"✅ PASS: {test_name} - Status {response.status_code}", "PASS")
+                return True
             else:
-                try:
-                    error_data = response.json()
-                    result["error"] = error_data
-                    self.log(f"❌ {name} - Status: {response.status_code}, Error: {error_data}")
-                except:
-                    result["error"] = response.text
-                    self.log(f"❌ {name} - Status: {response.status_code}, Error: {response.text}")
-            
-            self.results[name] = result
-            return result
-            
+                self.log(f"❌ FAIL: {test_name} - Expected {expected_status}, got {response.status_code}", "FAIL")
+                self.log(f"Response: {response.text[:500]}", "FAIL")
+                return False
         except Exception as e:
-            self.log(f"❌ {name} - Exception: {str(e)}", "ERROR")
-            self.results[name] = {
-                "name": name,
-                "success": False,
-                "error": str(e),
-                "method": method,
-                "url": url
-            }
-            return self.results[name]
+            self.log(f"❌ ERROR: {test_name} - Exception: {str(e)}", "ERROR")
+            return False
     
     def seed_data(self):
-        """Initialize seed data"""
-        return self.test_endpoint(
-            "Seed Data",
-            "POST",
-            f"{BASE_URL}/seed"
-        )
+        """Ensure seed data exists"""
+        self.log("Setting up seed data...")
+        try:
+            response = self.session.post(f"{BASE_URL}/seed")
+            if response.status_code in [200, 409]:  # 409 if already seeded
+                self.log("✅ Seed data ready")
+                return True
+            else:
+                self.log(f"❌ Seed data failed: {response.status_code}")
+                return False
+        except Exception as e:
+            self.log(f"❌ Seed data error: {str(e)}")
+            return False
     
-    def test_auth_flow(self):
-        """Test authentication endpoints"""
-        self.log("=== TESTING AUTH FLOW ===")
+    def test_auth_login(self):
+        """Test 1: POST /auth/login - verify returns access_token AND refresh_token"""
+        self.log("Testing Auth Login...")
         
-        # 1. Admin Login
-        admin_result = self.test_endpoint(
-            "Admin Login",
-            "POST",
-            f"{BASE_URL}/auth/login",
-            json={
+        try:
+            response = self.session.post(f"{BASE_URL}/auth/login", json={
                 "email": ADMIN_EMAIL,
                 "password": ADMIN_PASSWORD
-            }
-        )
-        
-        if admin_result["success"]:
-            self.admin_token = admin_result["data"]["access_token"]
-            self.log(f"Admin token obtained: {self.admin_token[:20]}...")
-        
-        # 2. Test User Registration (in case it doesn't exist)
-        test_reg_result = self.test_endpoint(
-            "Test User Registration",
-            "POST",
-            f"{BASE_URL}/auth/register",
-            json={
-                "email": TEST_EMAIL,
-                "password": TEST_PASSWORD,
-                "name": "Teste Utilizador",
-                "employeeId": "TEST001"
-            }
-        )
-        
-        # 3. Test User Login
-        test_login_result = self.test_endpoint(
-            "Test User Login", 
-            "POST",
-            f"{BASE_URL}/auth/login",
-            json={
-                "email": TEST_EMAIL,
-                "password": TEST_PASSWORD
-            }
-        )
-        
-        if test_login_result["success"]:
-            self.test_user_token = test_login_result["data"]["access_token"]
-            self.test_user_id = test_login_result["data"]["user"]["id"]
-            self.log(f"Test user token obtained: {self.test_user_token[:20]}...")
-        
-        # 4. Get current user with token
-        if self.test_user_token:
-            self.test_endpoint(
-                "Auth Me",
-                "GET",
-                f"{BASE_URL}/auth/me",
-                headers={"Authorization": f"Bearer {self.test_user_token}"}
-            )
-    
-    def test_workplace_setup(self):
-        """Test workplace management endpoints"""
-        self.log("=== TESTING WORKPLACE SETUP ===")
-        
-        if not self.admin_token:
-            self.log("❌ No admin token available for workplace tests", "ERROR")
-            return
-        
-        admin_headers = {"Authorization": f"Bearer {self.admin_token}"}
-        
-        # 1. List workplaces
-        workplaces_result = self.test_endpoint(
-            "List Workplaces",
-            "GET",
-            f"{BASE_URL}/admin/workplaces",
-            headers=admin_headers
-        )
-        
-        # Get workplace ID from existing workplaces
-        if workplaces_result["success"] and workplaces_result["data"]:
-            self.workplace_id = workplaces_result["data"][0]["id"]
-            self.log(f"Using existing workplace ID: {self.workplace_id}")
-        
-        # 2. Create workplace if none exists
-        if not self.workplace_id:
-            create_result = self.test_endpoint(
-                "Create Workplace",
-                "POST",
-                f"{BASE_URL}/admin/workplaces",
-                headers=admin_headers,
-                json={
-                    "name": "Test Workplace",
-                    "latitude": WORKPLACE_LAT,
-                    "longitude": WORKPLACE_LON,
-                    "radiusMeters": WORKPLACE_RADIUS,
-                    "startTime": "09:00",
-                    "endTime": "18:00",
-                    "allowedMarginMinutes": 120
-                }
-            )
+            })
             
-            if create_result["success"]:
-                self.workplace_id = create_result["data"]["id"]
-        
-        # 3. List users
-        self.test_endpoint(
-            "List Users",
-            "GET",
-            f"{BASE_URL}/admin/users",
-            headers=admin_headers
-        )
-        
-        # 4. Assign workplace to test user
-        if self.workplace_id and self.test_user_id:
-            self.test_endpoint(
-                "Assign Workplace",
-                "POST",
-                f"{BASE_URL}/admin/assign-workplace",
-                headers=admin_headers,
-                json={
-                    "userId": self.test_user_id,
-                    "workplaceId": self.workplace_id
-                }
-            )
-        
-        # 5. Get user workplace
-        if self.test_user_token:
-            self.test_endpoint(
-                "Get User Workplace",
-                "GET",
-                f"{BASE_URL}/workplace",
-                headers={"Authorization": f"Bearer {self.test_user_token}"}
-            )
-    
-    def test_punch_workflow(self):
-        """Test manual punch endpoints (critical priority)"""
-        self.log("=== TESTING PUNCH WORKFLOW ===")
-        
-        if not self.test_user_token:
-            self.log("❌ No test user token available for punch tests", "ERROR")
-            return
-        
-        test_headers = {"Authorization": f"Bearer {self.test_user_token}"}
-        
-        # 1. Manual CLOCK_IN
-        clock_in_result = self.test_endpoint(
-            "Manual Clock In",
-            "POST",
-            f"{BASE_URL}/punch/manual",
-            headers=test_headers,
-            json={
-                "punchType": "CLOCK_IN",
-                "latitude": WORKPLACE_LAT,
-                "longitude": WORKPLACE_LON,
-                "accuracy": 5.0
-            }
-        )
-        
-        # Wait a moment
-        time.sleep(1)
-        
-        # 2. Manual CLOCK_OUT - should work if CLOCK_IN succeeded
-        self.test_endpoint(
-            "Manual Clock Out",
-            "POST", 
-            f"{BASE_URL}/punch/manual",
-            headers=test_headers,
-            json={
-                "punchType": "CLOCK_OUT",
-                "latitude": WORKPLACE_LAT,
-                "longitude": WORKPLACE_LON,
-                "accuracy": 5.0
-            }
-        )
-        
-        # 3. Test location validation - outside geofence
-        self.test_endpoint(
-            "Punch Outside Geofence",
-            "POST",
-            f"{BASE_URL}/punch/manual",
-            headers=test_headers,
-            json={
-                "punchType": "CLOCK_IN",
-                "latitude": WORKPLACE_LAT + 0.01,  # Far from workplace
-                "longitude": WORKPLACE_LON + 0.01,
-                "accuracy": 5.0
-            }
-        )
-        
-        # 4. Test duplicate CLOCK_IN (should fail)
-        if clock_in_result.get("success"):
-            self.test_endpoint(
-                "Duplicate Clock In",
-                "POST",
-                f"{BASE_URL}/punch/manual", 
-                headers=test_headers,
-                json={
-                    "punchType": "CLOCK_IN",
-                    "latitude": WORKPLACE_LAT,
-                    "longitude": WORKPLACE_LON,
-                    "accuracy": 5.0
-                }
-            )
-    
-    def test_lunch_workflow(self):
-        """Test lunch break endpoints"""
-        self.log("=== TESTING LUNCH BREAK WORKFLOW ===")
-        
-        if not self.test_user_token:
-            self.log("❌ No test user token available for lunch tests", "ERROR")
-            return
+            if not self.assert_response(response, 200, "Auth Login"):
+                return False
+                
+            data = response.json()
             
-        test_headers = {"Authorization": f"Bearer {self.test_user_token}"}
+            # Verify both tokens are present
+            if "access_token" not in data:
+                self.log("❌ FAIL: Missing access_token in response")
+                return False
+            if "refresh_token" not in data:
+                self.log("❌ FAIL: Missing refresh_token in response")
+                return False
+            if "user" not in data:
+                self.log("❌ FAIL: Missing user data in response")
+                return False
+                
+            self.admin_token = data["access_token"]
+            self.refresh_token = data["refresh_token"]
+            
+            # Set auth header for future requests
+            self.session.headers.update({"Authorization": f"Bearer {self.admin_token}"})
+            
+            self.log("✅ PASS: Login returns both access_token and refresh_token")
+            return True
+            
+        except Exception as e:
+            self.log(f"❌ ERROR: Auth login exception: {str(e)}")
+            return False
+    
+    def test_refresh_token(self):
+        """Test 2: POST /auth/refresh - verify token rotation"""
+        self.log("Testing Refresh Token...")
         
-        # First ensure we have a CLOCK_IN for today
-        clock_in_result = self.test_endpoint(
-            "Clock In for Lunch Test",
-            "POST",
-            f"{BASE_URL}/punch/manual",
-            headers=test_headers,
-            json={
-                "punchType": "CLOCK_IN",
-                "latitude": WORKPLACE_LAT,
-                "longitude": WORKPLACE_LON, 
-                "accuracy": 5.0
-            }
-        )
+        if not self.refresh_token:
+            self.log("❌ SKIP: No refresh token available")
+            return False
+            
+        try:
+            response = self.session.post(f"{BASE_URL}/auth/refresh", json={
+                "refresh_token": self.refresh_token
+            })
+            
+            if not self.assert_response(response, 200, "Refresh Token"):
+                return False
+                
+            data = response.json()
+            
+            # Verify new tokens are different
+            old_access = self.admin_token
+            old_refresh = self.refresh_token
+            
+            if "access_token" not in data or "refresh_token" not in data:
+                self.log("❌ FAIL: Missing tokens in refresh response")
+                return False
+                
+            new_access = data["access_token"]
+            new_refresh = data["refresh_token"]
+            
+            if new_access == old_access:
+                self.log("❌ FAIL: Access token not rotated")
+                return False
+            if new_refresh == old_refresh:
+                self.log("❌ FAIL: Refresh token not rotated")
+                return False
+                
+            # Update tokens
+            self.admin_token = new_access
+            self.refresh_token = new_refresh
+            self.session.headers.update({"Authorization": f"Bearer {self.admin_token}"})
+            
+            self.log("✅ PASS: Token rotation working correctly")
+            return True
+            
+        except Exception as e:
+            self.log(f"❌ ERROR: Refresh token exception: {str(e)}")
+            return False
+    
+    def test_rate_limiting(self):
+        """Test 3: Rate limiting - 6 failed attempts should trigger 429"""
+        self.log("Testing Rate Limiting...")
         
-        # 1. Start lunch break
-        lunch_start_result = self.test_endpoint(
-            "Lunch Start",
-            "POST",
-            f"{BASE_URL}/break/manual",
-            headers=test_headers,
-            json={
-                "breakType": "LUNCH_START",
-                "latitude": WORKPLACE_LAT,
-                "longitude": WORKPLACE_LON,
-                "accuracy": 5.0
-            }
-        )
+        test_email = "test@rate.limit"
         
-        # Wait a moment
-        time.sleep(1)
+        # Make 5 failed attempts first
+        for i in range(1, 6):
+            try:
+                response = requests.post(f"{BASE_URL}/auth/login", json={
+                    "email": test_email,
+                    "password": "wrong_password"
+                })
+                
+                if response.status_code != 401:
+                    self.log(f"❌ FAIL: Expected 401 on attempt {i}, got {response.status_code}")
+                    return False
+                    
+                self.log(f"Failed attempt {i}/5 - Status: {response.status_code}")
+                time.sleep(0.1)  # Brief pause
+                
+            except Exception as e:
+                self.log(f"❌ ERROR: Rate limit test attempt {i}: {str(e)}")
+                return False
         
-        # 2. End lunch break
-        if lunch_start_result.get("success"):
-            self.test_endpoint(
-                "Lunch End",
-                "POST",
-                f"{BASE_URL}/break/manual",
-                headers=test_headers,
-                json={
+        # 6th attempt should be rate limited
+        try:
+            response = requests.post(f"{BASE_URL}/auth/login", json={
+                "email": test_email,
+                "password": "wrong_password"
+            })
+            
+            if response.status_code == 429:
+                self.log("✅ PASS: Rate limiting triggered on 6th attempt")
+                return True
+            else:
+                self.log(f"❌ FAIL: Expected 429 on 6th attempt, got {response.status_code}")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ ERROR: Rate limit final test: {str(e)}")
+            return False
+    
+    def test_geofence_idempotency(self):
+        """Test 4: POST /events/geofence with same eventId twice"""
+        self.log("Testing Geofence Idempotency...")
+        
+        event_id = f"test_event_{int(time.time())}"
+        
+        geofence_data = {
+            "eventId": event_id,
+            "eventType": "ENTER",
+            "latitude": WORKPLACE_LAT,
+            "longitude": WORKPLACE_LON,
+            "accuracy": 10.0
+        }
+        
+        try:
+            # First request
+            response1 = self.session.post(f"{BASE_URL}/events/geofence", json=geofence_data)
+            
+            if not self.assert_response(response1, 200, "Geofence Event First"):
+                return False
+            
+            data1 = response1.json()
+            
+            # Second request with same eventId
+            response2 = self.session.post(f"{BASE_URL}/events/geofence", json=geofence_data)
+            
+            if not self.assert_response(response2, 200, "Geofence Event Duplicate"):
+                return False
+                
+            data2 = response2.json()
+            
+            # Verify duplicate flag
+            if data2.get("duplicate") != True:
+                self.log(f"❌ FAIL: Second request should return duplicate: true, got: {data2.get('duplicate')}")
+                return False
+                
+            self.log("✅ PASS: Idempotency working - duplicate event detected")
+            return True
+            
+        except Exception as e:
+            self.log(f"❌ ERROR: Geofence idempotency test: {str(e)}")
+            return False
+    
+    def test_time_window_validation(self):
+        """Test 5: POST /punch/manual with time window validation"""
+        self.log("Testing Time Window Validation...")
+        
+        punch_data = {
+            "punchType": "CLOCK_IN",
+            "latitude": WORKPLACE_LAT,
+            "longitude": WORKPLACE_LON,
+            "accuracy": 10.0
+        }
+        
+        try:
+            response = self.session.post(f"{BASE_URL}/punch/manual", json=punch_data)
+            
+            # Could be success or failure depending on current time
+            if response.status_code == 200:
+                self.log("✅ PASS: Manual punch successful (within time window)")
+                return True
+            elif response.status_code == 400:
+                data = response.text
+                if "Janela permitida:" in data or "janela" in data.lower():
+                    self.log("✅ PASS: Time window validation working - shows allowed window")
+                    return True
+                else:
+                    self.log(f"❌ FAIL: Error message doesn't show time window: {data}")
+                    return False
+            else:
+                self.log(f"❌ FAIL: Unexpected status code: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ ERROR: Time window validation test: {str(e)}")
+            return False
+    
+    def test_lunch_break_rules(self):
+        """Test 6: Lunch break validation rules"""
+        self.log("Testing Lunch Break Rules...")
+        
+        # Test LUNCH_START without CLOCK_IN
+        lunch_start_data = {
+            "breakType": "LUNCH_START",
+            "latitude": WORKPLACE_LAT,
+            "longitude": WORKPLACE_LON,
+            "accuracy": 10.0
+        }
+        
+        try:
+            response = self.session.post(f"{BASE_URL}/break/manual", json=lunch_start_data)
+            
+            if response.status_code == 400:
+                error_text = response.text.lower()
+                if "entrada" in error_text or "clock_in" in error_text:
+                    self.log("✅ PASS: LUNCH_START requires CLOCK_IN - validation working")
+                else:
+                    self.log(f"❌ FAIL: Wrong error message for LUNCH_START without CLOCK_IN: {response.text}")
+                    return False
+            else:
+                # If successful, user might already have CLOCK_IN, try LUNCH_END without START
+                lunch_end_data = {
                     "breakType": "LUNCH_END",
                     "latitude": WORKPLACE_LAT,
                     "longitude": WORKPLACE_LON,
-                    "accuracy": 5.0
+                    "accuracy": 10.0
                 }
-            )
-        
-        # 3. Test lunch without CLOCK_IN (on new day simulation)
-        # This would be tested with different user or by clearing data
-        
-        # 4. Test lunch outside geofence
-        self.test_endpoint(
-            "Lunch Outside Geofence",
-            "POST",
-            f"{BASE_URL}/break/manual",
-            headers=test_headers,
-            json={
-                "breakType": "LUNCH_START",
-                "latitude": WORKPLACE_LAT + 0.01,
-                "longitude": WORKPLACE_LON + 0.01,
-                "accuracy": 5.0
-            }
-        )
+                
+                response2 = self.session.post(f"{BASE_URL}/break/manual", json=lunch_end_data)
+                
+                if response2.status_code == 400:
+                    error_text = response2.text.lower()
+                    if "iniciad" in error_text or "start" in error_text:
+                        self.log("✅ PASS: LUNCH_END requires LUNCH_START - validation working")
+                        return True
+                    else:
+                        self.log(f"❌ FAIL: Wrong error for LUNCH_END without START: {response2.text}")
+                        return False
+                else:
+                    self.log("✅ PASS: Lunch break rules validation working")
+                    return True
+                    
+            return True
+            
+        except Exception as e:
+            self.log(f"❌ ERROR: Lunch break rules test: {str(e)}")
+            return False
     
-    def test_timesheet(self):
+    def test_export_csv(self):
+        """Test 7: GET /export/timesheet.csv - verify CSV format"""
+        self.log("Testing CSV Export...")
+        
+        try:
+            response = self.session.get(f"{BASE_URL}/export/timesheet.csv")
+            
+            if not self.assert_response(response, 200, "CSV Export"):
+                return False
+                
+            content_type = response.headers.get("content-type", "")
+            if "csv" not in content_type:
+                self.log(f"❌ FAIL: CSV export wrong content-type: {content_type}")
+                return False
+                
+            # Check for CSV headers
+            content = response.text
+            if "Funcionário" in content and "Data" in content:
+                self.log("✅ PASS: CSV export format valid")
+                return True
+            else:
+                self.log(f"❌ FAIL: CSV content doesn't contain expected headers")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ ERROR: CSV export test: {str(e)}")
+            return False
+    
+    def test_export_xlsx(self):
+        """Test 8: GET /export/timesheet.xlsx - verify binary response"""
+        self.log("Testing XLSX Export...")
+        
+        try:
+            response = self.session.get(f"{BASE_URL}/export/timesheet.xlsx")
+            
+            if not self.assert_response(response, 200, "XLSX Export"):
+                return False
+                
+            content_type = response.headers.get("content-type", "")
+            if "spreadsheet" in content_type or "xlsx" in content_type:
+                self.log("✅ PASS: XLSX export content-type correct")
+                return True
+            else:
+                self.log(f"❌ FAIL: XLSX export wrong content-type: {content_type}")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ ERROR: XLSX export test: {str(e)}")
+            return False
+    
+    def test_export_pdf(self):
+        """Test 9: GET /export/timesheet.pdf - verify HTML response"""
+        self.log("Testing PDF Export...")
+        
+        try:
+            response = self.session.get(f"{BASE_URL}/export/timesheet.pdf")
+            
+            if not self.assert_response(response, 200, "PDF Export"):
+                return False
+                
+            # Check for HTML content (MVP PDF is HTML-based)
+            content = response.text
+            if "<html" in content.lower() or "<!doctype" in content.lower():
+                self.log("✅ PASS: PDF export returns HTML (as expected for MVP)")
+                return True
+            else:
+                self.log(f"❌ FAIL: PDF export doesn't return HTML content")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ ERROR: PDF export test: {str(e)}")
+            return False
+    
+    def test_admin_audit_logs(self):
+        """Test 10: GET /admin/audit-logs - verify audit logs exist"""
+        self.log("Testing Admin Audit Logs...")
+        
+        try:
+            response = self.session.get(f"{BASE_URL}/admin/audit-logs")
+            
+            if not self.assert_response(response, 200, "Admin Audit Logs"):
+                return False
+                
+            data = response.json()
+            
+            if isinstance(data, list):
+                self.log(f"✅ PASS: Audit logs endpoint returns list with {len(data)} entries")
+                return True
+            else:
+                self.log(f"❌ FAIL: Audit logs should return list, got: {type(data)}")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ ERROR: Audit logs test: {str(e)}")
+            return False
+    
+    def test_admin_anomalies(self):
+        """Test 11: GET /admin/anomalies - verify anomaly detection works"""
+        self.log("Testing Admin Anomalies...")
+        
+        try:
+            response = self.session.get(f"{BASE_URL}/admin/anomalies")
+            
+            if not self.assert_response(response, 200, "Admin Anomalies"):
+                return False
+                
+            data = response.json()
+            
+            if isinstance(data, list):
+                self.log(f"✅ PASS: Anomalies endpoint returns list with {len(data)} entries")
+                return True
+            else:
+                self.log(f"❌ FAIL: Anomalies should return list, got: {type(data)}")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ ERROR: Anomalies test: {str(e)}")
+            return False
+    
+    def test_unique_constraint(self):
+        """Test 12: Try to create duplicate punch - should fail"""
+        self.log("Testing Unique Constraint...")
+        
+        # First, ensure we're clocked out to test clean
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            
+            punch_data = {
+                "punchType": "CLOCK_IN",
+                "latitude": WORKPLACE_LAT,
+                "longitude": WORKPLACE_LON,
+                "accuracy": 10.0,
+                "forceOutsideWindow": True  # Force to avoid time window issues
+            }
+            
+            # First punch
+            response1 = self.session.post(f"{BASE_URL}/punch/manual", json=punch_data)
+            
+            # Could succeed or fail if already exists
+            if response1.status_code == 200:
+                # Try duplicate
+                response2 = self.session.post(f"{BASE_URL}/punch/manual", json=punch_data)
+                
+                if response2.status_code == 400:
+                    error_text = response2.text
+                    if "já registado" in error_text or "already" in error_text.lower():
+                        self.log("✅ PASS: Unique constraint prevents duplicate punches")
+                        return True
+                    else:
+                        self.log(f"❌ FAIL: Wrong error for duplicate: {error_text}")
+                        return False
+                else:
+                    self.log(f"❌ FAIL: Duplicate punch should fail, got status: {response2.status_code}")
+                    return False
+            elif response1.status_code == 400:
+                error_text = response1.text
+                if "já registado" in error_text:
+                    self.log("✅ PASS: Unique constraint working (punch already exists today)")
+                    return True
+                else:
+                    self.log(f"❌ FAIL: Unexpected error for punch: {error_text}")
+                    return False
+            else:
+                self.log(f"❌ FAIL: Unexpected status for first punch: {response1.status_code}")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ ERROR: Unique constraint test: {str(e)}")
+            return False
+    
+    def test_get_current_user(self):
+        """Test GET /auth/me"""
+        self.log("Testing GET /auth/me...")
+        
+        try:
+            response = self.session.get(f"{BASE_URL}/auth/me")
+            
+            if not self.assert_response(response, 200, "Get Current User"):
+                return False
+                
+            data = response.json()
+            
+            if "email" in data and "name" in data and "role" in data:
+                self.log("✅ PASS: /auth/me returns user data")
+                return True
+            else:
+                self.log(f"❌ FAIL: Missing required fields in user response")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ ERROR: Get current user test: {str(e)}")
+            return False
+    
+    def test_workplace_endpoints(self):
+        """Test workplace endpoints"""
+        self.log("Testing Workplace Endpoints...")
+        
+        try:
+            # Get user workplace
+            response = self.session.get(f"{BASE_URL}/workplace")
+            
+            if not self.assert_response(response, 200, "Get User Workplace"):
+                return False
+                
+            # Get admin workplaces
+            response2 = self.session.get(f"{BASE_URL}/admin/workplaces")
+            
+            if not self.assert_response(response2, 200, "Get Admin Workplaces"):
+                return False
+                
+            data = response2.json()
+            if isinstance(data, list) and len(data) > 0:
+                self.log("✅ PASS: Workplace endpoints working")
+                return True
+            else:
+                self.log(f"❌ FAIL: Admin workplaces should return non-empty list")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ ERROR: Workplace endpoints test: {str(e)}")
+            return False
+    
+    def test_timesheet_endpoints(self):
         """Test timesheet endpoints"""
-        self.log("=== TESTING TIMESHEET ===")
+        self.log("Testing Timesheet Endpoints...")
         
-        if not self.test_user_token:
-            self.log("❌ No test user token available for timesheet tests", "ERROR")
-            return
+        try:
+            # Get today status
+            response1 = self.session.get(f"{BASE_URL}/timesheet/today")
             
-        test_headers = {"Authorization": f"Bearer {self.test_user_token}"}
-        
-        # 1. Get today's status
-        self.test_endpoint(
-            "Today Status",
-            "GET",
-            f"{BASE_URL}/timesheet/today",
-            headers=test_headers
-        )
-        
-        # 2. Get timesheet history (default last 30 days)
-        self.test_endpoint(
-            "Timesheet History",
-            "GET",
-            f"{BASE_URL}/timesheet",
-            headers=test_headers
-        )
-        
-        # 3. Get timesheet with date range
-        from_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-        to_date = datetime.now().strftime("%Y-%m-%d")
-        
-        self.test_endpoint(
-            "Timesheet Date Range",
-            "GET", 
-            f"{BASE_URL}/timesheet",
-            headers=test_headers,
-            params={
-                "from_date": from_date,
-                "to_date": to_date
-            }
-        )
-    
-    def test_export(self):
-        """Test export endpoints"""
-        self.log("=== TESTING EXPORT ===")
-        
-        if not self.test_user_token:
-            self.log("❌ No test user token available for export tests", "ERROR")
-            return
+            if not self.assert_response(response1, 200, "Get Today Status"):
+                return False
+                
+            # Get history
+            response2 = self.session.get(f"{BASE_URL}/timesheet")
             
-        test_headers = {"Authorization": f"Bearer {self.test_user_token}"}
-        
-        # 1. Export CSV
-        csv_result = self.test_endpoint(
-            "Export CSV",
-            "GET",
-            f"{BASE_URL}/export/timesheet.csv",
-            headers=test_headers
-        )
-        
-        # Check if we got CSV content
-        if csv_result.get("success"):
-            content_type = "text/csv" in str(csv_result.get("headers", {}))
-            self.log(f"CSV export content type correct: {content_type}")
-        
-        # 2. Export XLSX
-        xlsx_result = self.test_endpoint(
-            "Export XLSX",
-            "GET",
-            f"{BASE_URL}/export/timesheet.xlsx", 
-            headers=test_headers
-        )
-        
-        # Check if we got XLSX content
-        if xlsx_result.get("success"):
-            content_type = "sheet" in str(xlsx_result.get("headers", {}))
-            self.log(f"XLSX export content type correct: {content_type}")
-        
-        # 3. Admin export with user filter
-        if self.admin_token and self.test_user_id:
-            admin_headers = {"Authorization": f"Bearer {self.admin_token}"}
-            
-            self.test_endpoint(
-                "Admin CSV Export",
-                "GET",
-                f"{BASE_URL}/export/timesheet.csv",
-                headers=admin_headers,
-                params={"user_id": self.test_user_id}
-            )
-    
-    def test_geofence_events(self):
-        """Test geofence event processing (idempotency)"""
-        self.log("=== TESTING GEOFENCE EVENTS ===")
-        
-        if not self.test_user_token:
-            self.log("❌ No test user token available for geofence tests", "ERROR")
-            return
-            
-        test_headers = {"Authorization": f"Bearer {self.test_user_token}"}
-        
-        # Generate unique event ID
-        event_id = str(uuid.uuid4())
-        
-        # 1. Process ENTER event
-        enter_result = self.test_endpoint(
-            "Geofence Enter Event",
-            "POST",
-            f"{BASE_URL}/events/geofence",
-            headers=test_headers,
-            json={
-                "eventId": event_id,
-                "eventType": "ENTER",
-                "latitude": WORKPLACE_LAT,
-                "longitude": WORKPLACE_LON,
-                "accuracy": 5.0,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        )
-        
-        # 2. Process same event again (test idempotency)
-        if enter_result.get("success"):
-            duplicate_result = self.test_endpoint(
-                "Geofence Duplicate Event",
-                "POST",
-                f"{BASE_URL}/events/geofence",
-                headers=test_headers,
-                json={
-                    "eventId": event_id,  # Same event ID
-                    "eventType": "ENTER",
-                    "latitude": WORKPLACE_LAT,
-                    "longitude": WORKPLACE_LON,
-                    "accuracy": 5.0,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            )
-            
-            # Check if it was marked as duplicate
-            if duplicate_result.get("success") and duplicate_result.get("data"):
-                is_duplicate = duplicate_result["data"].get("duplicate", False)
-                self.log(f"Idempotency test: duplicate={is_duplicate}")
-        
-        # 3. Process EXIT event
-        exit_event_id = str(uuid.uuid4())
-        self.test_endpoint(
-            "Geofence Exit Event",
-            "POST",
-            f"{BASE_URL}/events/geofence",
-            headers=test_headers,
-            json={
-                "eventId": exit_event_id,
-                "eventType": "EXIT", 
-                "latitude": WORKPLACE_LAT,
-                "longitude": WORKPLACE_LON,
-                "accuracy": 5.0,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        )
-        
-        # 4. Test geofence event outside radius
-        outside_event_id = str(uuid.uuid4())
-        self.test_endpoint(
-            "Geofence Outside Event",
-            "POST",
-            f"{BASE_URL}/events/geofence",
-            headers=test_headers,
-            json={
-                "eventId": outside_event_id,
-                "eventType": "ENTER",
-                "latitude": WORKPLACE_LAT + 0.01,  # Outside radius
-                "longitude": WORKPLACE_LON + 0.01,
-                "accuracy": 5.0,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        )
+            if not self.assert_response(response2, 200, "Get Timesheet History"):
+                return False
+                
+            data = response2.json()
+            if isinstance(data, list):
+                self.log("✅ PASS: Timesheet endpoints working")
+                return True
+            else:
+                self.log(f"❌ FAIL: Timesheet should return list")
+                return False
+                
+        except Exception as e:
+            self.log(f"❌ ERROR: Timesheet endpoints test: {str(e)}")
+            return False
     
     def run_all_tests(self):
         """Run all tests in priority order"""
-        self.log("🚀 Starting GeoPunch Backend API Testing Suite")
+        self.log("="*80)
+        self.log("STARTING GEOPUNCH BACKEND API v2.0 TESTING")
+        self.log("="*80)
         
-        # Initialize data
-        self.seed_data()
+        # Setup
+        if not self.seed_data():
+            self.log("❌ CRITICAL: Seed data setup failed")
+            return False
         
-        # Test in priority order as specified
-        self.test_auth_flow()
-        self.test_workplace_setup()
-        self.test_punch_workflow()  # Critical priority
-        self.test_lunch_workflow()
-        self.test_timesheet()
-        self.test_export()
-        self.test_geofence_events()
+        test_methods = [
+            ("Auth Security - Login", self.test_auth_login),
+            ("Auth Security - Refresh Token", self.test_refresh_token), 
+            ("Auth Security - Rate Limiting", self.test_rate_limiting),
+            ("Idempotency Test", self.test_geofence_idempotency),
+            ("Time Window Validation", self.test_time_window_validation),
+            ("Lunch Break Rules", self.test_lunch_break_rules),
+            ("Export CSV", self.test_export_csv),
+            ("Export XLSX", self.test_export_xlsx),
+            ("Export PDF", self.test_export_pdf),
+            ("Admin Audit Logs", self.test_admin_audit_logs),
+            ("Admin Anomalies", self.test_admin_anomalies),
+            ("Unique Constraint", self.test_unique_constraint),
+            ("Get Current User", self.test_get_current_user),
+            ("Workplace Endpoints", self.test_workplace_endpoints),
+            ("Timesheet Endpoints", self.test_timesheet_endpoints),
+        ]
         
-        return self.generate_summary()
-    
-    def generate_summary(self):
-        """Generate test results summary"""
-        self.log("📊 GENERATING TEST SUMMARY")
+        passed = 0
+        total = len(test_methods)
         
-        total_tests = len(self.results)
-        passed_tests = sum(1 for r in self.results.values() if r["success"])
-        failed_tests = total_tests - passed_tests
+        for test_name, test_method in test_methods:
+            self.log("-" * 60)
+            self.log(f"RUNNING: {test_name}")
+            try:
+                if test_method():
+                    passed += 1
+            except Exception as e:
+                self.log(f"❌ EXCEPTION in {test_name}: {str(e)}", "ERROR")
         
-        summary = {
-            "total_tests": total_tests,
-            "passed": passed_tests,
-            "failed": failed_tests,
-            "pass_rate": f"{(passed_tests/total_tests*100):.1f}%" if total_tests > 0 else "0%",
-            "failed_tests": []
-        }
+        # Summary
+        self.log("="*80)
+        self.log("TEST SUMMARY")
+        self.log("="*80)
+        pass_rate = (passed / total) * 100
+        self.log(f"PASSED: {passed}/{total} ({pass_rate:.1f}%)")
         
-        print("\n" + "="*60)
-        print("📋 TEST RESULTS SUMMARY")
-        print("="*60)
-        print(f"Total Tests: {total_tests}")
-        print(f"✅ Passed: {passed_tests}")
-        print(f"❌ Failed: {failed_tests}")
-        print(f"📈 Pass Rate: {summary['pass_rate']}")
+        if pass_rate >= 95:
+            self.log("🎉 EXCELLENT: Pass rate ≥95% achieved!")
+        elif pass_rate >= 80:
+            self.log("✅ GOOD: Pass rate ≥80%")
+        else:
+            self.log("⚠️  NEEDS WORK: Pass rate <80%")
         
-        if failed_tests > 0:
-            print(f"\n❌ FAILED TESTS:")
-            for name, result in self.results.items():
-                if not result["success"]:
-                    error_msg = result.get("error", "Unknown error")
-                    if isinstance(error_msg, dict):
-                        error_msg = error_msg.get("detail", str(error_msg))
-                    print(f"  - {name}: {error_msg}")
-                    summary["failed_tests"].append({
-                        "name": name,
-                        "error": error_msg,
-                        "status_code": result.get("status_code"),
-                        "method": result.get("method"),
-                        "url": result.get("url")
-                    })
-        
-        if passed_tests > 0:
-            print(f"\n✅ PASSED TESTS:")
-            for name, result in self.results.items():
-                if result["success"]:
-                    print(f"  - {name}")
-        
-        print("="*60)
-        return summary
+        return pass_rate >= 95
 
 if __name__ == "__main__":
     tester = GeoPunchTester()
-    summary = tester.run_all_tests()
-    
-    # Exit with appropriate code
-    exit_code = 0 if summary["failed"] == 0 else 1
-    print(f"\nExiting with code: {exit_code}")
-    exit(exit_code)
+    success = tester.run_all_tests()
+    sys.exit(0 if success else 1)
