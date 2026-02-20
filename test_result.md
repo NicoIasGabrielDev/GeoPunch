@@ -411,15 +411,11 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Events - Process geofence event"
-    - "Punch - Manual clock in/out"
-    - "Break - Manual lunch start/end"
-    - "Timesheet - Get today status"
-    - "Export - CSV"
-    - "Export - Excel XLSX"
-  stuck_tasks: []
-  test_all: true
-  test_priority: "high_first"
+    - "Auth - Login screen"
+  stuck_tasks:
+    - "Auth - Login screen"
+  test_all: false
+  test_priority: "stuck_first"
 
 agent_communication:
   - agent: "main"
