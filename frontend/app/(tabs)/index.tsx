@@ -413,14 +413,39 @@ export default function HomeScreen() {
         </View>
 
         {renderPermissionDiagnostics()}
+        {renderWorkdayWarning()}
+
+        {/* Active workplace card */}
+        {workplace && (
+          <TouchableOpacity 
+            style={styles.workplaceCard}
+            onPress={() => router.push('/(tabs)/workplaces')}
+          >
+            <View style={styles.workplaceCardContent}>
+              <View style={styles.workplaceIcon}>
+                <Ionicons name="business" size={24} color="#1a73e8" />
+              </View>
+              <View style={styles.workplaceInfo}>
+                <Text style={styles.workplaceLabel}>Local Ativo</Text>
+                <Text style={styles.workplaceName}>{workplace.name}</Text>
+                {workplace.schedule && (
+                  <Text style={styles.workplaceSchedule}>
+                    {workplace.schedule.startTime} - {workplace.schedule.endTime}
+                  </Text>
+                )}
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#999" />
+            </View>
+          </TouchableOpacity>
+        )}
 
         {todayStatus && (
           <StatusCard
             status={todayStatus.status}
             workplaceName={workplace?.name}
             distance={distance}
-            clockIn={todayStatus.clockIn}
-            clockOut={todayStatus.clockOut}
+            clockIn={todayStatus.punchIn?.occurredAt}
+            clockOut={todayStatus.punchOut?.occurredAt}
             netWorkedFormatted={todayStatus.netWorkedFormatted}
           />
         )}
@@ -433,34 +458,24 @@ export default function HomeScreen() {
               <Ionicons name="log-in" size={20} color="#28a745" />
               <Text style={styles.detailLabel}>Entrada:</Text>
               <Text style={styles.detailValue}>
-                {todayStatus.clockIn
-                  ? new Date(todayStatus.clockIn).toLocaleTimeString('pt-PT', {
+                {todayStatus.punchIn
+                  ? new Date(todayStatus.punchIn.occurredAt).toLocaleTimeString('pt-PT', {
                       hour: '2-digit',
                       minute: '2-digit',
                     })
                   : '--:--'}
-                {todayStatus.clockInMethod && (
-                  <Text style={styles.methodTag}> ({todayStatus.clockInMethod})</Text>
+                {todayStatus.punchIn?.outsideWorkplace && (
+                  <Text style={styles.outsideTag}> (fora do local)</Text>
                 )}
               </Text>
             </View>
 
             <View style={styles.detailRow}>
-              <Ionicons name="restaurant" size={20} color="#ffc107" />
-              <Text style={styles.detailLabel}>Almoço:</Text>
+              <Ionicons name="time" size={20} color="#ffc107" />
+              <Text style={styles.detailLabel}>Pausas:</Text>
               <Text style={styles.detailValue}>
-                {todayStatus.lunchStart
-                  ? new Date(todayStatus.lunchStart).toLocaleTimeString('pt-PT', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })
-                  : '--:--'}
-                {' - '}
-                {todayStatus.lunchEnd
-                  ? new Date(todayStatus.lunchEnd).toLocaleTimeString('pt-PT', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })
+                {todayStatus.breakMinutes > 0 
+                  ? `${Math.floor(todayStatus.breakMinutes / 60)}h ${todayStatus.breakMinutes % 60}min`
                   : '--:--'}
               </Text>
             </View>
@@ -469,27 +484,25 @@ export default function HomeScreen() {
               <Ionicons name="log-out" size={20} color="#dc3545" />
               <Text style={styles.detailLabel}>Saída:</Text>
               <Text style={styles.detailValue}>
-                {todayStatus.clockOut
-                  ? new Date(todayStatus.clockOut).toLocaleTimeString('pt-PT', {
+                {todayStatus.punchOut
+                  ? new Date(todayStatus.punchOut.occurredAt).toLocaleTimeString('pt-PT', {
                       hour: '2-digit',
                       minute: '2-digit',
                     })
                   : '--:--'}
-                {todayStatus.clockOutMethod && (
-                  <Text style={styles.methodTag}> ({todayStatus.clockOutMethod})</Text>
+                {todayStatus.punchOut?.outsideWorkplace && (
+                  <Text style={styles.outsideTag}> (fora do local)</Text>
                 )}
               </Text>
             </View>
 
-            {todayStatus.breakMinutes > 0 && (
-              <View style={styles.detailRow}>
-                <Ionicons name="time" size={20} color="#6c757d" />
-                <Text style={styles.detailLabel}>Pausa:</Text>
-                <Text style={styles.detailValue}>
-                  {Math.floor(todayStatus.breakMinutes / 60)}h {todayStatus.breakMinutes % 60}min
-                </Text>
-              </View>
-            )}
+            <View style={[styles.detailRow, { borderBottomWidth: 0 }]}>
+              <Ionicons name="hourglass" size={20} color="#1a73e8" />
+              <Text style={styles.detailLabel}>Total:</Text>
+              <Text style={[styles.detailValue, { fontWeight: '700', color: '#1a73e8' }]}>
+                {todayStatus.netWorkedFormatted}
+              </Text>
+            </View>
           </View>
         )}
 
