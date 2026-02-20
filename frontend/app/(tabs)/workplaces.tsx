@@ -351,7 +351,22 @@ export default function WorkplacesScreen() {
             
             <Button
               title="Confirmar Localização"
-              onPress={() => setWizardStep(3)}
+              onPress={() => {
+                // Ensure we have coordinates before proceeding
+                if (!wizardData.latitude || !wizardData.longitude) {
+                  if (userLocation) {
+                    setWizardData(prev => ({
+                      ...prev,
+                      latitude: userLocation.latitude,
+                      longitude: userLocation.longitude,
+                    }));
+                  } else {
+                    Alert.alert('Erro', 'Por favor, clique em "Usar localização atual" primeiro');
+                    return;
+                  }
+                }
+                setWizardStep(3);
+              }}
               style={{ marginTop: 16 }}
             />
           </View>
