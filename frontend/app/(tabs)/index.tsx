@@ -33,6 +33,7 @@ interface TodayStatusExtended extends TodayStatus {
 
 export default function HomeScreen() {
   const { user, refreshUser } = useAuth();
+  const router = useRouter();
   const [todayStatus, setTodayStatus] = useState<TodayStatusExtended | null>(null);
   const [workplace, setWorkplace] = useState<Workplace | null>(null);
   const [currentLocation, setCurrentLocation] = useState<LocationData | null>(null);
@@ -42,6 +43,7 @@ export default function HomeScreen() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [locationPermission, setLocationPermission] = useState<boolean>(false);
   const [backgroundPermission, setBackgroundPermission] = useState<boolean>(false);
+  const [isWorkday, setIsWorkday] = useState<boolean>(true);
 
   useFocusEffect(
     useCallback(() => {
@@ -64,6 +66,23 @@ export default function HomeScreen() {
       setDistance(dist);
     }
   }, [currentLocation, workplace]);
+
+  // Check if today is a workday
+  useEffect(() => {
+    if (workplace?.workdays) {
+      const dayMap: { [key: number]: keyof typeof workplace.workdays } = {
+        0: 'sunday',
+        1: 'monday',
+        2: 'tuesday',
+        3: 'wednesday',
+        4: 'thursday',
+        5: 'friday',
+        6: 'saturday',
+      };
+      const today = new Date().getDay();
+      setIsWorkday(workplace.workdays[dayMap[today]] || false);
+    }
+  }, [workplace]);
 
   const setupLocation = async () => {
     try {
@@ -90,7 +109,7 @@ export default function HomeScreen() {
     setLocationPermission(granted);
     if (granted) {
       updateLocation();
-      await setupLocation(); // Re-check background permission
+      await setupLocation();
     }
   };
 
@@ -110,7 +129,7 @@ export default function HomeScreen() {
       setLoading(true);
       const [statusRes, workplaceRes] = await Promise.all([
         timesheetApi.getTodayStatus(),
-        workplaceApi.getUserWorkplace(),
+        workplaceApi.getActive(),
       ]);
       setTodayStatus(statusRes.data);
       setWorkplace(statusRes.data.workplace || workplaceRes.data);
@@ -129,9 +148,24 @@ export default function HomeScreen() {
     setRefreshing(false);
   };
 
-  const handleManualPunch = async (punchType: 'CLOCK_IN' | 'CLOCK_OUT') => {
+  const handleManualPunch = async (punchType: 'IN' | 'OUT') => {
     if (!currentLocation) {
       Alert.alert('Erro', 'Não foi possível obter a sua localização. Por favor, ative a localização.');
+      return;
+    }
+
+    // Warn about outside geofence but allow punch
+    const withinGeofence = distance !== undefined && workplace && distance <= workplace.radiusMeters;
+    
+    if (!withinGeofence && workplace) {
+      Alert.alert(
+        'Fora do Local de Trabalho',
+        `Está a ${Math.round(distance || 0)}m do local (máximo ${workplace.radiusMeters}m). O registo será marcado como "fora do local". Deseja continuar?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Continuar', onPress: () => executePunch(punchType) },
+        ]
+      );
       return;
     }
 
@@ -150,16 +184,17 @@ export default function HomeScreen() {
     executePunch(punchType);
   };
 
-  const executePunch = async (punchType: 'CLOCK_IN' | 'CLOCK_OUT') => {
+  const executePunch = async (punchType: 'IN' | 'OUT') => {
     setActionLoading(punchType);
     try {
-      const response = await eventsApi.manualPunch({
+      await punchApi.create({
         punchType,
         latitude: currentLocation!.latitude,
         longitude: currentLocation!.longitude,
         accuracy: currentLocation!.accuracy,
+        method: 'manual',
       });
-      Alert.alert('Sucesso', response.data.message);
+      Alert.alert('Sucesso', punchType === 'IN' ? 'Entrada registada' : 'Saída registada');
       await loadData();
     } catch (error: any) {
       const message = error.response?.data?.detail || 'Erro ao registar';
@@ -169,7 +204,7 @@ export default function HomeScreen() {
     }
   };
 
-  const handleLunchBreak = async (breakType: 'LUNCH_START' | 'LUNCH_END') => {
+  const handleBreak = async (breakType: 'BREAK_START' | 'BREAK_END') => {
     if (!currentLocation) {
       Alert.alert('Erro', 'Não foi possível obter a sua localização');
       return;
@@ -177,13 +212,14 @@ export default function HomeScreen() {
 
     setActionLoading(breakType);
     try {
-      const response = await eventsApi.manualBreak({
-        breakType,
+      await punchApi.create({
+        punchType: breakType,
         latitude: currentLocation.latitude,
         longitude: currentLocation.longitude,
         accuracy: currentLocation.accuracy,
+        method: 'manual',
       });
-      Alert.alert('Sucesso', response.data.message);
+      Alert.alert('Sucesso', breakType === 'BREAK_START' ? 'Pausa iniciada' : 'Pausa terminada');
       await loadData();
     } catch (error: any) {
       const message = error.response?.data?.detail || 'Erro ao registar';
