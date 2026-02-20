@@ -212,15 +212,21 @@ export default function WorkplacesScreen() {
   };
 
   const handleCreateWorkplace = async () => {
+    console.log('handleCreateWorkplace called', wizardData);
+    
     if (!wizardData.name.trim()) {
+      console.log('Name is empty');
       Alert.alert('Erro', 'Nome é obrigatório');
       return;
     }
     
     if (!wizardData.latitude || !wizardData.longitude) {
+      console.log('Location is null', { lat: wizardData.latitude, lng: wizardData.longitude });
       Alert.alert('Erro', 'Selecione a localização no mapa');
       return;
     }
+    
+    console.log('Creating workplace with data:', wizardData);
     
     try {
       if (editingWorkplace) {
