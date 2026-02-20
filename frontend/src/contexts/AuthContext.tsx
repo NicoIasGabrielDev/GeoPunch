@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { authApi, setToken, removeToken, getToken, seedData } from '../services/api';
+import { authApi, setToken, removeToken, getToken, setRefreshToken, seedData } from '../services/api';
 import { User } from '../types';
 
 interface AuthContextType {
@@ -40,6 +40,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const login = async (email: string, password: string) => {
     const response = await authApi.login({ email, password });
     await setToken(response.data.access_token);
+    if (response.data.refresh_token) {
+      await setRefreshToken(response.data.refresh_token);
+    }
     setUser(response.data.user);
   };
 
@@ -53,6 +56,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     
     const response = await authApi.register({ email, password, name, employeeId });
     await setToken(response.data.access_token);
+    if (response.data.refresh_token) {
+      await setRefreshToken(response.data.refresh_token);
+    }
     setUser(response.data.user);
   };
 
