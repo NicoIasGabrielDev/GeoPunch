@@ -73,7 +73,7 @@ export const removeToken = async (): Promise<void> => {
   }
 };
 
-// Request interceptor to add token
+// Request interceptor
 api.interceptors.request.use(
   async (config) => {
     const token = await getToken();
@@ -85,13 +85,12 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor to handle token refresh
+// Response interceptor for token refresh
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
     
-    // If 401 and not already retried, try to refresh token
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
       
@@ -110,7 +109,6 @@ api.interceptors.response.use(
           return api(originalRequest);
         }
       } catch (refreshError) {
-        // Refresh failed, remove tokens
         await removeToken();
         return Promise.reject(refreshError);
       }
@@ -129,29 +127,44 @@ export const authApi = {
   getMe: () => api.get('/auth/me'),
 };
 
-// Workplace endpoints
+// Workplace endpoints (user-owned)
 export const workplaceApi = {
+  list: () => api.get('/workplaces'),
+  create: (data: any) => api.post('/workplaces', data),
+  update: (id: string, data: any) => api.put(`/workplaces/${id}`, data),
+  setActive: (id: string) => api.post(`/workplaces/${id}/activate`),
+  getActive: () => api.get('/workplaces/active'),
+  // Legacy
   getUserWorkplace: () => api.get('/workplace'),
-  listAll: () => api.get('/admin/workplaces'),
-  create: (data: any) => api.post('/admin/workplaces', data),
-  update: (id: string, data: any) => api.put(`/admin/workplaces/${id}`, data),
-  delete: (id: string) => api.delete(`/admin/workplaces/${id}`),
-  assignToUser: (userId: string, workplaceId: string) =>
-    api.post('/admin/assign-workplace', { userId, workplaceId }),
 };
 
-// Users endpoint (admin)
-export const usersApi = {
-  list: () => api.get('/admin/users'),
+// Punch endpoints
+export const punchApi = {
+  create: (data: {
+    punchType: string;
+    latitude: number;
+    longitude: number;
+    accuracy: number;
+    note?: string;
+    method?: string;
+  }) => api.post('/punch', data),
+  // Legacy endpoints
+  manualPunch: (data: any) => api.post('/punch/manual', data),
+  manualBreak: (data: any) => api.post('/break/manual', data),
 };
 
 // Events endpoints
 export const eventsApi = {
   processGeofence: (data: any) => api.post('/events/geofence', data),
-  manualPunch: (data: { punchType: string; latitude: number; longitude: number; accuracy: number }) =>
-    api.post('/punch/manual', data),
-  manualBreak: (data: { breakType: string; latitude: number; longitude: number; accuracy: number }) =>
-    api.post('/break/manual', data),
+  // Legacy compatibility
+  manualPunch: (data: any) => punchApi.create({
+    ...data,
+    punchType: data.punchType === 'CLOCK_IN' ? 'IN' : data.punchType === 'CLOCK_OUT' ? 'OUT' : data.punchType
+  }),
+  manualBreak: (data: any) => punchApi.create({
+    ...data,
+    punchType: data.breakType === 'LUNCH_START' ? 'BREAK_START' : data.breakType === 'LUNCH_END' ? 'BREAK_END' : data.breakType
+  }),
 };
 
 // Timesheet endpoints
@@ -169,6 +182,11 @@ export const timesheetApi = {
       params: { from_date: fromDate, to_date: toDate },
       responseType: 'blob',
     }),
+};
+
+// Geocoding
+export const geocodeApi = {
+  reverse: (lat: number, lng: number) => api.get('/geocode/reverse', { params: { lat, lng } }),
 };
 
 // Seed endpoint
