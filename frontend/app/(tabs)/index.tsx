@@ -86,12 +86,26 @@ export default function HomeScreen() {
 
   const setupLocation = async () => {
     try {
+      // Check if location services are available
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        console.log('Location services disabled');
+        setLocationPermission(false);
+        return;
+      }
+
       const { status: foregroundStatus } = await Location.getForegroundPermissionsAsync();
       setLocationPermission(foregroundStatus === 'granted');
       
       if (Platform.OS !== 'web') {
-        const { status: backgroundStatus } = await Location.getBackgroundPermissionsAsync();
-        setBackgroundPermission(backgroundStatus === 'granted');
+        try {
+          const { status: backgroundStatus } = await Location.getBackgroundPermissionsAsync();
+          setBackgroundPermission(backgroundStatus === 'granted');
+        } catch (bgError) {
+          // Background permissions might not be available in Expo Go
+          console.log('Background location check failed:', bgError);
+          setBackgroundPermission(false);
+        }
       } else {
         setBackgroundPermission(true); // Not applicable on web
       }
