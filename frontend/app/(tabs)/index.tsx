@@ -113,17 +113,40 @@ export default function HomeScreen() {
       if (foregroundStatus === 'granted') {
         updateLocation();
       }
-    } catch (error) {
-      console.error('Error checking permissions:', error);
+    } catch (error: any) {
+      // Handle Expo Go limitation - location permissions not available
+      if (error?.message?.includes('NSLocation') || error?.message?.includes('Info.plist')) {
+        console.log('Location not available in Expo Go - use development build');
+        setLocationPermission(false);
+        setBackgroundPermission(false);
+      } else {
+        console.error('Error checking permissions:', error);
+      }
     }
   };
 
   const requestPermissions = async () => {
-    const granted = await requestLocationPermissions();
-    setLocationPermission(granted);
-    if (granted) {
-      updateLocation();
-      await setupLocation();
+    try {
+      const granted = await requestLocationPermissions();
+      setLocationPermission(granted);
+      if (granted) {
+        updateLocation();
+        await setupLocation();
+      }
+    } catch (error: any) {
+      // Handle Expo Go limitation
+      if (error?.message?.includes('NSLocation') || error?.message?.includes('Info.plist')) {
+        console.log('Location permissions not available in Expo Go');
+        Alert.alert(
+          'Limitação do Expo Go',
+          'As permissões de localização não estão disponíveis no Expo Go. Para funcionalidade completa, use um development build.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        console.error('Error requesting permissions:', error);
+      }
+    }
+  };
     }
   };
 
