@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional
 import sys
 
 # Configuration
-BASE_URL = "https://email-2.preview.emergentagent.com/api"
+BASE_URL = "https://geofence-assist.preview.emergentagent.com/api"
 ADMIN_EMAIL = "admin@geopunch.pt"
 ADMIN_PASSWORD = "admin123"
 WORKPLACE_LAT = 38.7223
