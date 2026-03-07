@@ -29,7 +29,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const response = await authApi.getMe();
         setUser(response.data);
       }
-    } catch (error) {
+    } catch {
       console.log('Not authenticated');
       await removeToken();
     } finally {
@@ -50,7 +50,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // First try to seed data (creates admin and sample workplace)
     try {
       await seedData();
-    } catch (e) {
+    } catch {
       // Ignore if already seeded
     }
     

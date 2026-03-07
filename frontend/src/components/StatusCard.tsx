@@ -3,7 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 interface StatusCardProps {
-  status: 'not_started' | 'working' | 'on_lunch' | 'finished';
+  status: 'not_started' | 'working' | 'on_lunch' | 'on_break' | 'finished';
   workplaceName?: string;
   distance?: number;
   clockIn?: string | null;
@@ -26,6 +26,7 @@ export const StatusCard: React.FC<StatusCardProps> = ({
       case 'working':
         return { text: 'A trabalhar', color: '#28a745', icon: 'briefcase' as const };
       case 'on_lunch':
+      case 'on_break':
         return { text: 'Em pausa', color: '#ffc107', icon: 'restaurant' as const };
       case 'finished':
         return { text: 'Dia terminado', color: '#1a73e8', icon: 'checkmark-circle' as const };

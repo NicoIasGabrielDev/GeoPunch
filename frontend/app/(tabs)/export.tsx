@@ -10,9 +10,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { Button } from '../../src/components/Button';
 import { timesheetApi } from '../../src/services/api';
 
 export default function ExportScreen() {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,6 @@ import {
   Alert,
   TouchableOpacity,
   Modal,
-  TextInput,
   FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,7 +23,7 @@ export default function AdminScreen() {
   const { user } = useAuth();
   const [workplaces, setWorkplaces] = useState<Workplace[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingWorkplace, setEditingWorkplace] = useState<Workplace | null>(null);
@@ -53,7 +52,7 @@ export default function AdminScreen() {
       // First seed data to ensure admin exists
       try {
         await seedData();
-      } catch (e) {
+      } catch {
         // Ignore if already seeded
       }
       
@@ -97,9 +96,9 @@ export default function AdminScreen() {
       latitude: workplace.latitude.toString(),
       longitude: workplace.longitude.toString(),
       radiusMeters: workplace.radiusMeters.toString(),
-      startTime: workplace.startTime,
-      endTime: workplace.endTime,
-      allowedMarginMinutes: workplace.allowedMarginMinutes.toString(),
+      startTime: workplace.schedule?.startTime ?? '09:00',
+      endTime: workplace.schedule?.endTime ?? '18:00',
+      allowedMarginMinutes: (workplace.schedule?.marginMinutes ?? 120).toString(),
     });
     setModalVisible(true);
   };
@@ -146,7 +145,7 @@ export default function AdminScreen() {
               await workplaceApi.delete(workplace.id);
               Alert.alert('Sucesso', 'Local de trabalho eliminado');
               loadData();
-            } catch (error) {
+            } catch {
               Alert.alert('Erro', 'Não foi possível eliminar');
             }
           },
@@ -217,7 +216,7 @@ export default function AdminScreen() {
                   {workplace.latitude.toFixed(4)}, {workplace.longitude.toFixed(4)}
                 </Text>
                 <Text style={styles.workplaceSchedule}>
-                  {workplace.startTime} - {workplace.endTime} | Raio: {workplace.radiusMeters}m
+                  {workplace.schedule?.startTime ?? '—'} - {workplace.schedule?.endTime ?? '—'} | Raio: {workplace.radiusMeters}m
                 </Text>
               </View>
               <View style={styles.workplaceActions}>
@@ -252,8 +251,8 @@ export default function AdminScreen() {
                 <Text style={styles.userName}>{u.name}</Text>
                 <Text style={styles.userEmail}>{u.email}</Text>
                 <Text style={styles.userWorkplace}>
-                  {u.workplaceId
-                    ? workplaces.find((w) => w.id === u.workplaceId)?.name || 'Local atribuído'
+                  {u.activeWorkplaceId
+                    ? workplaces.find((w) => w.id === u.activeWorkplaceId)?.name || 'Local atribuído'
                     : 'Sem local atribuído'}
                 </Text>
               </View>

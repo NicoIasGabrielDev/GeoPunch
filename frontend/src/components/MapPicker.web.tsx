@@ -1,29 +1,30 @@
 import React from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 interface MapPickerProps {
   latitude: number | null;
   longitude: number | null;
   radiusMeters: number;
-  onRegionChange: (lat: number, lng: number) => void;
+  onLocationSelect: (lat: number, lng: number) => void;
   editable?: boolean;
   showUserLocation?: boolean;
+  userLatitude?: number;
+  userLongitude?: number;
 }
 
 // Web-only implementation - no map, just coordinates display
-export const MapPicker: React.FC<MapPickerProps> = ({ 
-  latitude, 
-  longitude, 
+export const MapPicker: React.FC<MapPickerProps> = ({
+  latitude,
+  longitude,
   radiusMeters,
-  onRegionChange 
 }) => {
   return (
     <View style={styles.webMapFallback}>
       <Ionicons name="map" size={48} color="#1a73e8" />
       <Text style={styles.webMapText}>Mapa não disponível na web</Text>
       <Text style={styles.webMapCoords}>
-        {latitude?.toFixed(6) || '0.000000'}, {longitude?.toFixed(6) || '0.000000'}
+        {latitude?.toFixed(6) ?? '0.000000'}, {longitude?.toFixed(6) ?? '0.000000'}
       </Text>
       <Text style={styles.webMapHint}>
         Use a aplicação móvel para selecionar a localização no mapa

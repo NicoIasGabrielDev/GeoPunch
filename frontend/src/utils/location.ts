@@ -1,5 +1,5 @@
 import * as Location from 'expo-location';
-import { Platform, Alert } from 'react-native';
+import { Platform } from 'react-native';
 
 export const calculateDistance = (
   lat1: number,

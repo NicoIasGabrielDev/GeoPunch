@@ -61,11 +61,11 @@ export interface TodayStatus {
     method: string;
     outsideWorkplace: boolean;
   } | null;
-  breaks: Array<{
+  breaks: {
     startedAt: string;
     endedAt: string | null;
     durationMinutes: number;
-  }>;
+  }[];
   grossMinutes: number;
   breakMinutes: number;
   netWorkedMinutes: number;

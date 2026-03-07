@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,19 +8,16 @@ import {
   TouchableOpacity,
   Modal,
   Alert,
-  Dimensions,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { workplaceApi, seedData } from '../../src/services/api';
 import { Button } from '../../src/components/Button';
 import { Input } from '../../src/components/Input';
+import { MapPicker } from '../../src/components/MapPicker';
 import { Workplace, WorkdaysConfig } from '../../src/types';
-
-const { width, height } = Dimensions.get('window');
 
 interface WizardData {
   name: string;
@@ -42,9 +39,8 @@ const WORKDAY_PRESETS = {
 };
 
 export default function WorkplacesScreen() {
-  const router = useRouter();
   const [workplaces, setWorkplaces] = useState<Workplace[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [wizardVisible, setWizardVisible] = useState(false);
   const [wizardStep, setWizardStep] = useState(1);
@@ -58,13 +54,6 @@ export default function WorkplacesScreen() {
     radiusMeters: 150,
     workdays: WORKDAY_PRESETS.weekdays,
     schedule: null,
-  });
-  
-  const [mapRegion, setMapRegion] = useState({
-    latitude: 38.7223,
-    longitude: -9.1393,
-    latitudeDelta: 0.01,
-    longitudeDelta: 0.01,
   });
 
   useFocusEffect(
@@ -83,12 +72,6 @@ export default function WorkplacesScreen() {
           latitude: location.coords.latitude,
           longitude: location.coords.longitude,
         });
-        setMapRegion({
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
-        });
       } else {
         // Fallback to Lisbon, Portugal coordinates
         const defaultLocation = {
@@ -96,11 +79,6 @@ export default function WorkplacesScreen() {
           longitude: -9.1393,
         };
         setUserLocation(defaultLocation);
-        setMapRegion({
-          ...defaultLocation,
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
-        });
       }
     } catch (error) {
       console.error('Error getting location:', error);
@@ -110,11 +88,6 @@ export default function WorkplacesScreen() {
         longitude: -9.1393,
       };
       setUserLocation(defaultLocation);
-      setMapRegion({
-        ...defaultLocation,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      });
     }
   };
 
@@ -124,7 +97,7 @@ export default function WorkplacesScreen() {
       // Seed data first
       try {
         await seedData();
-      } catch (e) {}
+      } catch {}
       
       const response = await workplaceApi.list();
       setWorkplaces(response.data);
@@ -153,15 +126,6 @@ export default function WorkplacesScreen() {
     setWizardStep(1);
     setEditingWorkplace(null);
     setWizardVisible(true);
-    
-    if (userLocation) {
-      setMapRegion({
-        latitude: userLocation.latitude,
-        longitude: userLocation.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      });
-    }
   };
 
   const handleSetActive = async (workplace: Workplace) => {
@@ -188,16 +152,9 @@ export default function WorkplacesScreen() {
     setWizardVisible(true);
   };
 
-  const handleMapPress = (e: any) => {
-    if (editingWorkplace) return; // Can't change location when editing
-    
-    const { latitude, longitude } = e.nativeEvent.coordinate;
-    setWizardData(prev => ({ ...prev, latitude, longitude }));
-  };
-
-  const handleMapRegionChange = (region: any) => {
+  const handleLocationSelect = (lat: number, lng: number) => {
     if (editingWorkplace) return;
-    setWizardData(prev => ({ ...prev, latitude: region.latitude, longitude: region.longitude }));
+    setWizardData(prev => ({ ...prev, latitude: lat, longitude: lng }));
   };
 
   const toggleWorkday = (day: keyof WorkdaysConfig) => {
@@ -286,54 +243,43 @@ export default function WorkplacesScreen() {
           <View style={styles.wizardContent}>
             <Text style={styles.wizardTitle}>Localização</Text>
             <Text style={styles.wizardSubtitle}>
-              Mova o mapa para posicionar o pin no local exato.
+              Toque no mapa para posicionar o pin no local exato, ou arraste o marcador.
               {'\n'}
               <Text style={styles.warningText}>⚠️ A localização ficará BLOQUEADA após confirmar.</Text>
             </Text>
-            
+
             <View style={styles.mapContainer}>
-              {/* Web fallback - Map not available on web */}
-              <View style={styles.webMapFallback}>
-                <Ionicons name="map" size={48} color="#1a73e8" />
-                <Text style={styles.webMapText}>
-                  {Platform.OS === 'web' 
-                    ? 'Mapa não disponível na web' 
-                    : 'A carregar mapa...'
-                  }
-                </Text>
-                <Text style={styles.webMapCoords}>
-                  {wizardData.latitude?.toFixed(6) || userLocation?.latitude?.toFixed(6) || '0.000000'},{' '}
-                  {wizardData.longitude?.toFixed(6) || userLocation?.longitude?.toFixed(6) || '0.000000'}
-                </Text>
-                <Button
-                  title="Usar localização atual"
-                  onPress={() => {
-                    if (userLocation) {
-                      setWizardData(prev => ({
-                        ...prev,
-                        latitude: userLocation.latitude,
-                        longitude: userLocation.longitude
-                      }));
-                    }
-                  }}
-                  variant="outline"
-                  size="small"
-                  style={{ marginTop: 16 }}
-                />
-                <Text style={styles.hintText}>
-                  {Platform.OS === 'web' 
-                    ? 'Use a aplicação móvel para selecionar no mapa'
-                    : 'Toque no botão acima para usar a sua localização'
-                  }
-                </Text>
-              </View>
-              
-              {/* Center pin indicator */}
-              <View style={styles.centerPin}>
-                <Ionicons name="location" size={40} color="#1a73e8" />
-              </View>
+              <MapPicker
+                latitude={wizardData.latitude}
+                longitude={wizardData.longitude}
+                radiusMeters={wizardData.radiusMeters}
+                onLocationSelect={handleLocationSelect}
+                editable={true}
+                showUserLocation={true}
+                userLatitude={userLocation?.latitude}
+                userLongitude={userLocation?.longitude}
+              />
             </View>
-            
+
+            {/* Coordinates display */}
+            <View style={styles.coordsRow}>
+              <Ionicons name="navigate" size={16} color="#1a73e8" />
+              <Text style={styles.coordsText}>
+                {wizardData.latitude?.toFixed(6) ?? '—'}, {wizardData.longitude?.toFixed(6) ?? '—'}
+              </Text>
+              <TouchableOpacity
+                style={styles.useLocationBtn}
+                onPress={() => {
+                  if (userLocation) {
+                    handleLocationSelect(userLocation.latitude, userLocation.longitude);
+                  }
+                }}
+              >
+                <Ionicons name="locate" size={16} color="#fff" />
+                <Text style={styles.useLocationBtnText}>Usar atual</Text>
+              </TouchableOpacity>
+            </View>
+
             <View style={styles.radiusSelector}>
               <Text style={styles.radiusLabel}>Raio: {wizardData.radiusMeters}m</Text>
               <View style={styles.radiusButtons}>
@@ -354,11 +300,10 @@ export default function WorkplacesScreen() {
                 ))}
               </View>
             </View>
-            
+
             <Button
               title="Confirmar Localização"
               onPress={() => {
-                // Ensure we have coordinates before proceeding
                 if (!wizardData.latitude || !wizardData.longitude) {
                   if (userLocation) {
                     setWizardData(prev => ({
@@ -367,7 +312,7 @@ export default function WorkplacesScreen() {
                       longitude: userLocation.longitude,
                     }));
                   } else {
-                    Alert.alert('Erro', 'Por favor, clique em "Usar localização atual" primeiro');
+                    Alert.alert('Erro', 'Selecione a localização no mapa ou clique em "Usar atual"');
                     return;
                   }
                 }
@@ -850,37 +795,38 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   mapContainer: {
-    height: 300,
+    height: 350,
     marginTop: 16,
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: '#f5f5f5',
   },
-  map: {
-    flex: 1,
-  },
-  centerPin: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    marginLeft: -20,
-    marginTop: -40,
-  },
-  webMapFallback: {
-    flex: 1,
+  coordsRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
+    marginTop: 10,
+    paddingHorizontal: 4,
   },
-  webMapText: {
-    fontSize: 16,
+  coordsText: {
+    flex: 1,
+    fontSize: 13,
     color: '#666',
-    marginTop: 12,
+    marginLeft: 6,
+    fontVariant: ['tabular-nums'],
   },
-  webMapCoords: {
+  useLocationBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a73e8',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  useLocationBtnText: {
+    color: '#fff',
     fontSize: 12,
-    color: '#999',
-    marginTop: 8,
+    fontWeight: '600',
+    marginLeft: 4,
   },
   radiusSelector: {
     marginTop: 16,

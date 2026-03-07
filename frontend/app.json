@@ -15,7 +15,11 @@
         "NSLocationWhenInUseUsageDescription": "GeoPunch precisa da sua localização para verificar presença no local de trabalho e registar ponto.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "GeoPunch precisa de acesso contínuo à localização para notificações automáticas de entrada e saída do trabalho.",
         "NSLocationAlwaysUsageDescription": "GeoPunch precisa de acesso contínuo à localização para notificações automáticas de entrada e saída do trabalho.",
-        "UIBackgroundModes": ["location", "fetch"]
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -25,6 +29,11 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.geopunch.app",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyBx4HyqvondsGv83Q4Os_mgZ3Yy58YwC4Q"
+        }
+      },
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
@@ -54,7 +63,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/splash-image.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#1a73e8"
@@ -63,6 +72,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "18b75681-43e4-44ff-b8be-1a479e8e2d82"
+      }
     }
   }
 }

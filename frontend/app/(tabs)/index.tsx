@@ -24,11 +24,11 @@ import {
   getCurrentLocation,
 } from '../../src/utils/location';
 
-interface TodayStatusExtended extends TodayStatus {
-  workplace?: {
+interface TodayStatusExtended extends Omit<TodayStatus, 'workplace'> {
+  workplace: ({
     clockInWindow?: string;
     clockOutWindow?: string;
-  } & Workplace | null;
+  } & Workplace) | null;
 }
 
 export default function HomeScreen() {
@@ -48,11 +48,13 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       loadData();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
   );
 
   useEffect(() => {
     setupLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -323,7 +325,7 @@ export default function HomeScreen() {
       <View style={[styles.warningBox, { backgroundColor: '#fff3cd', marginBottom: 16 }]}>
         <Ionicons name="information-circle" size={20} color="#856404" />
         <Text style={[styles.warningText, { color: '#856404' }]}>
-          Hoje não é um dia de trabalho configurado para "{workplace.name}"
+          Hoje não é um dia de trabalho configurado para &ldquo;{workplace.name}&rdquo;
         </Text>
       </View>
     );
@@ -332,7 +334,7 @@ export default function HomeScreen() {
   const renderPunchButtons = () => {
     if (!todayStatus) return null;
 
-    const { status, punchIn, punchOut, breaks } = todayStatus;
+    const { punchIn, punchOut, breaks } = todayStatus;
     const withinGeofence = distance !== undefined && workplace && distance <= workplace.radiusMeters;
     const hasOpenBreak = breaks?.some(b => b.endedAt === null);
 

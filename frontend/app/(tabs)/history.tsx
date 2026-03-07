@@ -5,7 +5,6 @@ import {
   StyleSheet,
   FlatList,
   RefreshControl,
-  TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
@@ -15,7 +14,7 @@ import { DayTimesheet } from '../../src/types';
 
 export default function HistoryScreen() {
   const [timesheet, setTimesheet] = useState<DayTimesheet[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   useFocusEffect(
@@ -83,7 +82,14 @@ export default function HistoryScreen() {
     }
   };
 
-  const renderItem = ({ item }: { item: DayTimesheet }) => (
+  const renderItem = ({ item }: { item: DayTimesheet }) => {
+    // Extract first IN and last OUT punches, and break info from the punches array
+    const punchIn = item.punches.find(p => p.type === 'IN');
+    const punchOut = [...item.punches].reverse().find(p => p.type === 'OUT');
+    const breakStart = item.punches.find(p => p.type === 'BREAK_START');
+    const breakEnd = item.punches.find(p => p.type === 'BREAK_END');
+
+    return (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <View>
@@ -99,9 +105,9 @@ export default function HistoryScreen() {
         <View style={styles.timeItem}>
           <Ionicons name="log-in" size={16} color="#28a745" />
           <Text style={styles.timeLabel}>Entrada</Text>
-          <Text style={styles.timeValue}>{formatTime(item.clockIn)}</Text>
-          {item.clockInMethod && (
-            <Text style={styles.methodText}>{item.clockInMethod}</Text>
+          <Text style={styles.timeValue}>{formatTime(punchIn?.occurredAt ?? null)}</Text>
+          {punchIn?.method && (
+            <Text style={styles.methodText}>{punchIn.method}</Text>
           )}
         </View>
 
@@ -109,16 +115,16 @@ export default function HistoryScreen() {
           <Ionicons name="restaurant" size={16} color="#ffc107" />
           <Text style={styles.timeLabel}>Almoço</Text>
           <Text style={styles.timeValue}>
-            {formatTime(item.lunchStart)} - {formatTime(item.lunchEnd)}
+            {formatTime(breakStart?.occurredAt ?? null)} - {formatTime(breakEnd?.occurredAt ?? null)}
           </Text>
         </View>
 
         <View style={styles.timeItem}>
           <Ionicons name="log-out" size={16} color="#dc3545" />
           <Text style={styles.timeLabel}>Saída</Text>
-          <Text style={styles.timeValue}>{formatTime(item.clockOut)}</Text>
-          {item.clockOutMethod && (
-            <Text style={styles.methodText}>{item.clockOutMethod}</Text>
+          <Text style={styles.timeValue}>{formatTime(punchOut?.occurredAt ?? null)}</Text>
+          {punchOut?.method && (
+            <Text style={styles.methodText}>{punchOut.method}</Text>
           )}
         </View>
       </View>
@@ -145,6 +151,7 @@ export default function HistoryScreen() {
       </View>
     </View>
   );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
