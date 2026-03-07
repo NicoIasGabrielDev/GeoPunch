@@ -1,9 +1,7 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
@@ -11,43 +9,17 @@ from pydantic import BaseModel, Field, EmailStr, validator
 from typing import List, Optional, Literal, Dict
 import uuid
 from datetime import datetime, timedelta, time, timezone
-from passlib.context import CryptContext
-from jose import JWTError, jwt
 import io
 import csv
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-from bson import ObjectId
 import asyncio
 from collections import defaultdict
-import hashlib
+from database import db  # Import Supabase database wrapper
+from auth_helper import get_current_user  # Import Supabase auth helper
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
-
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ.get('DB_NAME', 'geopunch')]
-
-# JWT Configuration
-SECRET_KEY = os.environ.get('JWT_SECRET', 'geopunch-secret-key-change-in-production')
-REFRESH_SECRET_KEY = os.environ.get('JWT_REFRESH_SECRET', 'geopunch-refresh-secret')
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-REFRESH_TOKEN_EXPIRE_DAYS = 7
-
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# Security
-security = HTTPBearer()
-
-# Rate limiting
-login_attempts = defaultdict(list)
-RATE_LIMIT_WINDOW = 300
-MAX_LOGIN_ATTEMPTS = 5
-LOCKOUT_DURATION = 900
 
 # Create the main app
 app = FastAPI(title="GeoPunch API", version="3.0.0")
@@ -130,22 +102,6 @@ class WorkplaceResponse(BaseModel):
     isActive: bool = False
     createdAt: datetime
 
-class UserCreate(BaseModel):
-    email: EmailStr
-    password: str
-    name: str
-    employeeId: Optional[str] = None
-    
-    @validator('password')
-    def password_strength(cls, v):
-        if len(v) < 6:
-            raise ValueError('Senha deve ter pelo menos 6 caracteres')
-        return v
-
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
-
 class UserResponse(BaseModel):
     id: str
     email: str
@@ -154,16 +110,6 @@ class UserResponse(BaseModel):
     role: str
     activeWorkplaceId: Optional[str] = None
     createdAt: datetime
-
-class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int = ACCESS_TOKEN_EXPIRE_MINUTES * 60
-    user: UserResponse
-
-class RefreshTokenRequest(BaseModel):
-    refresh_token: str
 
 class PunchCreate(BaseModel):
     punchType: Literal["IN", "OUT", "BREAK_START", "BREAK_END"]
@@ -214,55 +160,6 @@ class DayTimesheetResponse(BaseModel):
 
 # ==================== HELPER FUNCTIONS ====================
 
-def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
-
-def create_access_token(data: dict) -> str:
-    to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire, "type": "access"})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
-def create_refresh_token(data: dict) -> str:
-    to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-    to_encode.update({"exp": expire, "type": "refresh"})
-    return jwt.encode(to_encode, REFRESH_SECRET_KEY, algorithm=ALGORITHM)
-
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    try:
-        token = credentials.credentials
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        if payload.get("type") != "access":
-            raise HTTPException(status_code=401, detail="Token inválido")
-        user_id = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Token inválido")
-        user = await db.users.find_one({"_id": ObjectId(user_id)})
-        if user is None:
-            raise HTTPException(status_code=401, detail="Utilizador não encontrado")
-        return user
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Token inválido ou expirado")
-
-def check_rate_limit(email: str) -> bool:
-    now = datetime.utcnow()
-    login_attempts[email] = [t for t in login_attempts[email] if (now - t).total_seconds() < RATE_LIMIT_WINDOW]
-    if len(login_attempts[email]) >= MAX_LOGIN_ATTEMPTS:
-        oldest = min(login_attempts[email])
-        if (now - oldest).total_seconds() < LOCKOUT_DURATION:
-            return False
-    return True
-
-def record_login_attempt(email: str):
-    login_attempts[email].append(datetime.utcnow())
-
-def clear_login_attempts(email: str):
-    login_attempts[email] = []
-
 def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     from math import radians, sin, cos, sqrt, atan2
     R = 6371000
@@ -301,121 +198,21 @@ def generate_maps_link(lat: float, lng: float) -> str:
     return f"https://maps.google.com/?q={lat},{lng}"
 
 # ==================== AUTH ENDPOINTS ====================
-
-@api_router.post("/auth/register", response_model=TokenResponse)
-async def register(user_data: UserCreate):
-    existing = await db.users.find_one({"email": user_data.email.lower()})
-    if existing:
-        raise HTTPException(status_code=400, detail="Email já registado")
-    
-    user_doc = {
-        "email": user_data.email.lower(),
-        "password_hash": hash_password(user_data.password),
-        "name": user_data.name,
-        "employeeId": user_data.employeeId,
-        "role": "employee",
-        "activeWorkplaceId": None,
-        "createdAt": datetime.utcnow(),
-        "lastLogin": None,
-        "loginCount": 0
-    }
-    
-    result = await db.users.insert_one(user_doc)
-    user_doc["_id"] = result.inserted_id
-    
-    access_token = create_access_token({"sub": str(user_doc["_id"])})
-    refresh_token = create_refresh_token({"sub": str(user_doc["_id"])})
-    
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        user=UserResponse(
-            id=str(user_doc["_id"]),
-            email=user_doc["email"],
-            name=user_doc["name"],
-            employeeId=user_doc.get("employeeId"),
-            role=user_doc["role"],
-            activeWorkplaceId=None,
-            createdAt=user_doc["createdAt"]
-        )
-    )
-
-@api_router.post("/auth/login", response_model=TokenResponse)
-async def login(credentials: UserLogin):
-    email = credentials.email.lower()
-    
-    if not check_rate_limit(email):
-        raise HTTPException(status_code=429, detail="Demasiadas tentativas. Tente novamente em 15 minutos.")
-    
-    user = await db.users.find_one({"email": email})
-    if not user or not verify_password(credentials.password, user["password_hash"]):
-        record_login_attempt(email)
-        raise HTTPException(status_code=401, detail="Email ou senha incorretos")
-    
-    clear_login_attempts(email)
-    
-    await db.users.update_one(
-        {"_id": user["_id"]},
-        {"$set": {"lastLogin": datetime.utcnow()}, "$inc": {"loginCount": 1}}
-    )
-    
-    access_token = create_access_token({"sub": str(user["_id"])})
-    refresh_token = create_refresh_token({"sub": str(user["_id"])})
-    
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        user=UserResponse(
-            id=str(user["_id"]),
-            email=user["email"],
-            name=user["name"],
-            employeeId=user.get("employeeId"),
-            role=user["role"],
-            activeWorkplaceId=str(user["activeWorkplaceId"]) if user.get("activeWorkplaceId") else None,
-            createdAt=user["createdAt"]
-        )
-    )
-
-@api_router.post("/auth/refresh", response_model=TokenResponse)
-async def refresh_token(request: RefreshTokenRequest):
-    try:
-        payload = jwt.decode(request.refresh_token, REFRESH_SECRET_KEY, algorithms=[ALGORITHM])
-        if payload.get("type") != "refresh":
-            raise HTTPException(status_code=401, detail="Token inválido")
-        user_id = payload.get("sub")
-        user = await db.users.find_one({"_id": ObjectId(user_id)})
-        if not user:
-            raise HTTPException(status_code=401, detail="Utilizador não encontrado")
-        
-        new_access_token = create_access_token({"sub": str(user["_id"])})
-        new_refresh_token = create_refresh_token({"sub": str(user["_id"])})
-        
-        return TokenResponse(
-            access_token=new_access_token,
-            refresh_token=new_refresh_token,
-            user=UserResponse(
-                id=str(user["_id"]),
-                email=user["email"],
-                name=user["name"],
-                employeeId=user.get("employeeId"),
-                role=user["role"],
-                activeWorkplaceId=str(user["activeWorkplaceId"]) if user.get("activeWorkplaceId") else None,
-                createdAt=user["createdAt"]
-            )
-        )
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Token de refresh inválido ou expirado")
+# Authentication is handled by Supabase Auth
+# Users authenticate directly with Supabase and get a JWT token
+# The backend validates the token and retrieves user profile
 
 @api_router.get("/auth/me", response_model=UserResponse)
 async def get_me(user = Depends(get_current_user)):
+    """Get current authenticated user profile"""
     return UserResponse(
-        id=str(user["_id"]),
+        id=user["id"],
         email=user["email"],
         name=user["name"],
-        employeeId=user.get("employeeId"),
+        employeeId=user.get("employee_id"),
         role=user["role"],
-        activeWorkplaceId=str(user["activeWorkplaceId"]) if user.get("activeWorkplaceId") else None,
-        createdAt=user["createdAt"]
+        activeWorkplaceId=user.get("active_workplace_id"),
+        createdAt=datetime.fromisoformat(user["created_at"])
     )
 
 # ==================== WORKPLACE ENDPOINTS (USER-OWNED) ====================
@@ -423,22 +220,22 @@ async def get_me(user = Depends(get_current_user)):
 @api_router.get("/workplaces", response_model=List[WorkplaceResponse])
 async def list_user_workplaces(user = Depends(get_current_user)):
     """List all workplaces owned by the current user"""
-    workplaces = await db.workplaces.find({"userId": user["_id"]}).to_list(100)
-    active_id = user.get("activeWorkplaceId")
+    workplaces = await db.find_workplaces_by_user(user["id"])
+    active_id = user.get("active_workplace_id")
     
     return [
         WorkplaceResponse(
-            id=str(w["_id"]),
+            id=w["id"],
             name=w["name"],
-            latitude=w["latitude"],
-            longitude=w["longitude"],
-            radiusMeters=w["radiusMeters"],
+            latitude=float(w["latitude"]),
+            longitude=float(w["longitude"]),
+            radiusMeters=w["radius_meters"],
             workdays=w.get("workdays", {}),
             schedule=w.get("schedule"),
-            locationLocked=w.get("locationLocked", True),
-            configuredAt=w.get("configuredAt", w["createdAt"]),
-            isActive=str(w["_id"]) == str(active_id) if active_id else False,
-            createdAt=w["createdAt"]
+            locationLocked=w.get("location_locked", True),
+            configuredAt=datetime.fromisoformat(w.get("configured_at", w["created_at"])),
+            isActive=w["id"] == active_id if active_id else False,
+            createdAt=datetime.fromisoformat(w["created_at"])
         )
         for w in workplaces
     ]
@@ -446,161 +243,123 @@ async def list_user_workplaces(user = Depends(get_current_user)):
 @api_router.post("/workplaces", response_model=WorkplaceResponse)
 async def create_workplace(workplace: WorkplaceCreate, user = Depends(get_current_user)):
     """Create a new workplace with LOCKED location"""
-    now = datetime.utcnow()
+    now = datetime.utcnow().isoformat()
     
     workplace_doc = {
-        "userId": user["_id"],
+        "user_id": user["id"],
         "name": workplace.name,
         "latitude": workplace.latitude,
         "longitude": workplace.longitude,
-        "radiusMeters": workplace.radiusMeters,
+        "radius_meters": workplace.radiusMeters,
         "workdays": workplace.workdays.dict(),
-        "schedule": workplace.schedule.dict() if workplace.schedule else None,
-        "locationLocked": True,  # ALWAYS locked after creation
-        "configuredAt": now,
-        "createdAt": now,
-        "versionHistory": [{
-            "timestamp": now,
-            "changes": {"initial": True},
-            "workdays": workplace.workdays.dict(),
-            "schedule": workplace.schedule.dict() if workplace.schedule else None,
-            "radiusMeters": workplace.radiusMeters
-        }]
+        "schedule": workplace.schedule.dict() if workplace.schedule else {"startTime": "09:00", "endTime": "18:00", "marginMinutes": 120},
+        "location_locked": True,  # ALWAYS locked after creation
+        "configured_at": now,
+        "created_at": now
     }
     
-    result = await db.workplaces.insert_one(workplace_doc)
-    workplace_doc["_id"] = result.inserted_id
+    workplace_id = await db.create_workplace(workplace_doc)
+    if not workplace_id:
+        raise HTTPException(status_code=500, detail="Erro ao criar local de trabalho")
     
     # If this is the user's first workplace, set it as active
-    user_workplaces = await db.workplaces.count_documents({"userId": user["_id"]})
-    if user_workplaces == 1:
-        await db.users.update_one(
-            {"_id": user["_id"]},
-            {"$set": {"activeWorkplaceId": result.inserted_id}}
-        )
+    user_workplaces_count = await db.count_user_workplaces(user["id"])
+    is_first = user_workplaces_count == 1
+    if is_first:
+        await db.update_profile(user["id"], {"active_workplace_id": workplace_id})
     
     return WorkplaceResponse(
-        id=str(workplace_doc["_id"]),
+        id=workplace_id,
         name=workplace_doc["name"],
         latitude=workplace_doc["latitude"],
         longitude=workplace_doc["longitude"],
-        radiusMeters=workplace_doc["radiusMeters"],
+        radiusMeters=workplace_doc["radius_meters"],
         workdays=workplace_doc["workdays"],
         schedule=workplace_doc["schedule"],
         locationLocked=True,
-        configuredAt=workplace_doc["configuredAt"],
-        isActive=user_workplaces == 1,
-        createdAt=workplace_doc["createdAt"]
+        configuredAt=datetime.fromisoformat(workplace_doc["configured_at"]),
+        isActive=is_first,
+        createdAt=datetime.fromisoformat(workplace_doc["created_at"])
     )
 
 @api_router.put("/workplaces/{workplace_id}", response_model=WorkplaceResponse)
 async def update_workplace(workplace_id: str, update: WorkplaceUpdate, user = Depends(get_current_user)):
     """Update non-location fields only. Changes apply from next day."""
-    workplace = await db.workplaces.find_one({
-        "_id": ObjectId(workplace_id),
-        "userId": user["_id"]
-    })
+    workplace = await db.find_workplace_by_id(workplace_id, user["id"])
     
     if not workplace:
         raise HTTPException(status_code=404, detail="Local de trabalho não encontrado")
     
     # Build update dict (only non-location fields)
     update_dict = {}
-    changes = {}
-    now = datetime.utcnow()
     
     if update.name is not None:
         update_dict["name"] = update.name
-        changes["name"] = {"old": workplace["name"], "new": update.name}
     
     if update.radiusMeters is not None:
-        update_dict["radiusMeters"] = update.radiusMeters
-        changes["radiusMeters"] = {"old": workplace["radiusMeters"], "new": update.radiusMeters}
+        update_dict["radius_meters"] = update.radiusMeters
     
     if update.workdays is not None:
         update_dict["workdays"] = update.workdays.dict()
-        changes["workdays"] = {"old": workplace.get("workdays"), "new": update.workdays.dict()}
     
     if update.schedule is not None:
         update_dict["schedule"] = update.schedule.dict()
-        changes["schedule"] = {"old": workplace.get("schedule"), "new": update.schedule.dict()}
     
     if update_dict:
-        # Add to version history
-        version_entry = {
-            "timestamp": now,
-            "changes": changes,
-            "effectiveFrom": (now + timedelta(days=1)).strftime("%Y-%m-%d"),  # Changes apply from next day
-            "workdays": update_dict.get("workdays", workplace.get("workdays")),
-            "schedule": update_dict.get("schedule", workplace.get("schedule")),
-            "radiusMeters": update_dict.get("radiusMeters", workplace["radiusMeters"])
-        }
-        
-        await db.workplaces.update_one(
-            {"_id": ObjectId(workplace_id)},
-            {
-                "$set": update_dict,
-                "$push": {"versionHistory": version_entry}
-            }
-        )
+        await db.update_workplace(workplace_id, update_dict)
     
-    updated = await db.workplaces.find_one({"_id": ObjectId(workplace_id)})
-    active_id = user.get("activeWorkplaceId")
+    updated = await db.find_workplace_by_id(workplace_id, user["id"])
+    active_id = user.get("active_workplace_id")
     
     return WorkplaceResponse(
-        id=str(updated["_id"]),
+        id=updated["id"],
         name=updated["name"],
-        latitude=updated["latitude"],
-        longitude=updated["longitude"],
-        radiusMeters=updated["radiusMeters"],
+        latitude=float(updated["latitude"]),
+        longitude=float(updated["longitude"]),
+        radiusMeters=updated["radius_meters"],
         workdays=updated.get("workdays", {}),
         schedule=updated.get("schedule"),
         locationLocked=True,
-        configuredAt=updated.get("configuredAt", updated["createdAt"]),
-        isActive=str(updated["_id"]) == str(active_id) if active_id else False,
-        createdAt=updated["createdAt"]
+        configuredAt=datetime.fromisoformat(updated.get("configured_at", updated["created_at"])),
+        isActive=updated["id"] == active_id if active_id else False,
+        createdAt=datetime.fromisoformat(updated["created_at"])
     )
 
 @api_router.post("/workplaces/{workplace_id}/activate")
 async def set_active_workplace(workplace_id: str, user = Depends(get_current_user)):
     """Set a workplace as the active one"""
-    workplace = await db.workplaces.find_one({
-        "_id": ObjectId(workplace_id),
-        "userId": user["_id"]
-    })
+    workplace = await db.find_workplace_by_id(workplace_id, user["id"])
     
     if not workplace:
         raise HTTPException(status_code=404, detail="Local de trabalho não encontrado")
     
-    await db.users.update_one(
-        {"_id": user["_id"]},
-        {"$set": {"activeWorkplaceId": ObjectId(workplace_id)}}
-    )
+    await db.update_profile(user["id"], {"active_workplace_id": workplace_id})
     
     return {"message": f"'{workplace['name']}' definido como local de trabalho ativo"}
 
 @api_router.get("/workplaces/active", response_model=Optional[WorkplaceResponse])
 async def get_active_workplace(user = Depends(get_current_user)):
     """Get the currently active workplace"""
-    if not user.get("activeWorkplaceId"):
+    active_workplace_id = user.get("active_workplace_id")
+    if not active_workplace_id:
         return None
     
-    workplace = await db.workplaces.find_one({"_id": user["activeWorkplaceId"]})
+    workplace = await db.find_workplace_by_id(active_workplace_id, user["id"])
     if not workplace:
         return None
     
     return WorkplaceResponse(
-        id=str(workplace["_id"]),
+        id=workplace["id"],
         name=workplace["name"],
-        latitude=workplace["latitude"],
-        longitude=workplace["longitude"],
-        radiusMeters=workplace["radiusMeters"],
+        latitude=float(workplace["latitude"]),
+        longitude=float(workplace["longitude"]),
+        radiusMeters=workplace["radius_meters"],
         workdays=workplace.get("workdays", {}),
         schedule=workplace.get("schedule"),
         locationLocked=True,
-        configuredAt=workplace.get("configuredAt", workplace["createdAt"]),
+        configuredAt=datetime.fromisoformat(workplace.get("configured_at", workplace["created_at"])),
         isActive=True,
-        createdAt=workplace["createdAt"]
+        createdAt=datetime.fromisoformat(workplace["created_at"])
     )
 
 # Legacy endpoint for backwards compatibility
@@ -616,10 +375,11 @@ async def create_punch(punch: PunchCreate, user = Depends(get_current_user)):
     """Create a punch (IN, OUT, BREAK_START, BREAK_END)"""
     
     # Get active workplace
-    if not user.get("activeWorkplaceId"):
+    active_workplace_id = user.get("active_workplace_id")
+    if not active_workplace_id:
         raise HTTPException(status_code=400, detail="Nenhum local de trabalho ativo. Configure um local primeiro.")
     
-    workplace = await db.workplaces.find_one({"_id": user["activeWorkplaceId"]})
+    workplace = await db.find_workplace_by_id(active_workplace_id, user["id"])
     if not workplace:
         raise HTTPException(status_code=404, detail="Local de trabalho não encontrado")
     
@@ -630,132 +390,125 @@ async def create_punch(punch: PunchCreate, user = Depends(get_current_user)):
     # Calculate distance
     distance = calculate_distance(
         punch.latitude, punch.longitude,
-        workplace["latitude"], workplace["longitude"]
+        float(workplace["latitude"]), float(workplace["longitude"])
     )
     
-    outside_workplace = distance > workplace["radiusMeters"]
+    outside_workplace = distance > workplace["radius_meters"]
     
     # Validation for IN/OUT
     if punch.punchType == "IN":
         # Check if already punched in today
-        existing_in = await db.punches.find_one({
-            "userId": user["_id"],
+        existing_in = await db.find_punch({
+            "user_id": user["id"],
             "date": today,
-            "punchType": "IN"
+            "punch_type": "IN"
         })
         if existing_in:
             raise HTTPException(status_code=400, detail="Já registou entrada hoje")
     
     elif punch.punchType == "OUT":
         # Must have IN first
-        punch_in = await db.punches.find_one({
-            "userId": user["_id"],
+        punch_in = await db.find_punch({
+            "user_id": user["id"],
             "date": today,
-            "punchType": "IN"
+            "punch_type": "IN"
         })
         if not punch_in:
             raise HTTPException(status_code=400, detail="Não é possível registar saída sem entrada")
         
         # Check if already punched out
-        existing_out = await db.punches.find_one({
-            "userId": user["_id"],
+        existing_out = await db.find_punch({
+            "user_id": user["id"],
             "date": today,
-            "punchType": "OUT"
+            "punch_type": "OUT"
         })
         if existing_out:
             raise HTTPException(status_code=400, detail="Já registou saída hoje")
         
-        # Check for unclosed break
-        breaks = await db.punches.find({
-            "userId": user["_id"],
-            "date": today,
-            "punchType": {"$in": ["BREAK_START", "BREAK_END"]}
-        }).to_list(100)
+        # Check for unclosed break - need to filter in Python
+        all_breaks = await db.find_punches({
+            "user_id": user["id"],
+            "date": today
+        })
+        breaks = [b for b in all_breaks if b.get("punch_type") in ["BREAK_START", "BREAK_END"]]
         
-        break_starts = len([b for b in breaks if b["punchType"] == "BREAK_START"])
-        break_ends = len([b for b in breaks if b["punchType"] == "BREAK_END"])
+        break_starts = len([b for b in breaks if b["punch_type"] == "BREAK_START"])
+        break_ends = len([b for b in breaks if b["punch_type"] == "BREAK_END"])
         
         if break_starts > break_ends:
             raise HTTPException(status_code=400, detail="Termine a pausa antes de registar saída")
     
     elif punch.punchType == "BREAK_START":
         # Must have IN and no OUT
-        punch_in = await db.punches.find_one({
-            "userId": user["_id"],
+        punch_in = await db.find_punch({
+            "user_id": user["id"],
             "date": today,
-            "punchType": "IN"
+            "punch_type": "IN"
         })
         if not punch_in:
             raise HTTPException(status_code=400, detail="Não é possível iniciar pausa sem entrada")
         
-        punch_out = await db.punches.find_one({
-            "userId": user["_id"],
+        punch_out = await db.find_punch({
+            "user_id": user["id"],
             "date": today,
-            "punchType": "OUT"
+            "punch_type": "OUT"
         })
         if punch_out:
             raise HTTPException(status_code=400, detail="Não é possível iniciar pausa após saída")
         
         # Check for unclosed break
-        breaks = await db.punches.find({
-            "userId": user["_id"],
-            "date": today,
-            "punchType": {"$in": ["BREAK_START", "BREAK_END"]}
-        }).to_list(100)
+        all_breaks = await db.find_punches({
+            "user_id": user["id"],
+            "date": today
+        })
+        breaks = [b for b in all_breaks if b.get("punch_type") in ["BREAK_START", "BREAK_END"]]
         
-        break_starts = len([b for b in breaks if b["punchType"] == "BREAK_START"])
-        break_ends = len([b for b in breaks if b["punchType"] == "BREAK_END"])
+        break_starts = len([b for b in breaks if b["punch_type"] == "BREAK_START"])
+        break_ends = len([b for b in breaks if b["punch_type"] == "BREAK_END"])
         
         if break_starts > break_ends:
             raise HTTPException(status_code=400, detail="Já tem uma pausa em curso")
     
     elif punch.punchType == "BREAK_END":
         # Must have unclosed break
-        breaks = await db.punches.find({
-            "userId": user["_id"],
-            "date": today,
-            "punchType": {"$in": ["BREAK_START", "BREAK_END"]}
-        }).to_list(100)
+        all_breaks = await db.find_punches({
+            "user_id": user["id"],
+            "date": today
+        })
+        breaks = [b for b in all_breaks if b.get("punch_type") in ["BREAK_START", "BREAK_END"]]
         
-        break_starts = len([b for b in breaks if b["punchType"] == "BREAK_START"])
-        break_ends = len([b for b in breaks if b["punchType"] == "BREAK_END"])
+        break_starts = len([b for b in breaks if b["punch_type"] == "BREAK_START"])
+        break_ends = len([b for b in breaks if b["punch_type"] == "BREAK_END"])
         
         if break_starts <= break_ends:
             raise HTTPException(status_code=400, detail="Nenhuma pausa em curso para terminar")
     
     # Create punch with evidence data
     punch_doc = {
-        "userId": user["_id"],
-        "workplaceId": workplace["_id"],
-        "workplaceName": workplace["name"],
-        "workplaceLocationSnapshot": {
-            "latitude": workplace["latitude"],
-            "longitude": workplace["longitude"],
-            "radiusMeters": workplace["radiusMeters"]
-        },
+        "user_id": user["id"],
+        "workplace_id": workplace["id"],
+        "workplace_name": workplace["name"],
         "date": today,
-        "punchType": punch.punchType,
-        "occurredAt": device_time,
-        "receivedAt": server_time,
+        "punch_type": punch.punchType,
+        "occurred_at": device_time.isoformat(),
+        "received_at": server_time.isoformat(),
         "latitude": punch.latitude,
         "longitude": punch.longitude,
-        "accuracyMeters": punch.accuracy,
-        "distanceToWorkplaceMeters": distance,
+        "accuracy_meters": punch.accuracy,
+        "distance_to_workplace_meters": distance,
         "method": punch.method,
-        "outsideWorkplace": outside_workplace,
+        "outside_workplace": outside_workplace,
         "note": punch.note
     }
     
-    result = await db.punches.insert_one(punch_doc)
-    
-    location_warning = ""
-    if outside_workplace:
-        location_warning = f" (fora do local: {int(distance)}m)"
+    punch_id = await db.create_punch(punch_doc)
+    if not punch_id:
+        raise HTTPException(status_code=500, detail="Erro ao criar registo de ponto")
     
     return PunchResponse(
-        id=str(result.inserted_id),
-        userId=str(user["_id"]),
-        workplaceId=str(workplace["_id"]),
+        id=punch_id,
+        userId=user["id"],
+        workplaceId=workplace["id"],
         workplaceName=workplace["name"],
         date=today,
         punchType=punch.punchType,
@@ -809,7 +562,7 @@ async def process_geofence_event(event: GeofenceEventCreate, user = Depends(get_
     """Process geofence events - notify but don't auto-punch"""
     
     # Check idempotency
-    existing = await db.geofence_events.find_one({"eventId": event.eventId})
+    existing = await db.find_geofence_event(event.eventId, user["id"])
     if existing:
         return {
             "processed": True,
@@ -818,14 +571,15 @@ async def process_geofence_event(event: GeofenceEventCreate, user = Depends(get_
             "message": "Evento já processado"
         }
     
-    if not user.get("activeWorkplaceId"):
+    active_workplace_id = user.get("active_workplace_id")
+    if not active_workplace_id:
         return {
             "processed": True,
             "suggestion": None,
             "message": "Nenhum local de trabalho ativo"
         }
     
-    workplace = await db.workplaces.find_one({"_id": user["activeWorkplaceId"]})
+    workplace = await db.find_workplace_by_id(active_workplace_id, user["id"])
     if not workplace:
         return {
             "processed": True,
@@ -838,7 +592,7 @@ async def process_geofence_event(event: GeofenceEventCreate, user = Depends(get_
     
     distance = calculate_distance(
         event.latitude, event.longitude,
-        workplace["latitude"], workplace["longitude"]
+        float(workplace["latitude"]), float(workplace["longitude"])
     )
     
     # Determine suggestion based on event type
@@ -847,10 +601,10 @@ async def process_geofence_event(event: GeofenceEventCreate, user = Depends(get_
     
     if event.eventType == "ENTER":
         # Check if not already punched in
-        existing_in = await db.punches.find_one({
-            "userId": user["_id"],
+        existing_in = await db.find_punch({
+            "user_id": user["id"],
             "date": today,
-            "punchType": "IN"
+            "punch_type": "IN"
         })
         
         if not existing_in:
@@ -864,15 +618,15 @@ async def process_geofence_event(event: GeofenceEventCreate, user = Depends(get_
     
     elif event.eventType == "EXIT":
         # Check if punched in but not out
-        existing_in = await db.punches.find_one({
-            "userId": user["_id"],
+        existing_in = await db.find_punch({
+            "user_id": user["id"],
             "date": today,
-            "punchType": "IN"
+            "punch_type": "IN"
         })
-        existing_out = await db.punches.find_one({
-            "userId": user["_id"],
+        existing_out = await db.find_punch({
+            "user_id": user["id"],
             "date": today,
-            "punchType": "OUT"
+            "punch_type": "OUT"
         })
         
         if existing_in and not existing_out:
@@ -887,20 +641,18 @@ async def process_geofence_event(event: GeofenceEventCreate, user = Depends(get_
     
     # Store event
     geofence_doc = {
-        "eventId": event.eventId,
-        "userId": user["_id"],
-        "workplaceId": workplace["_id"],
-        "eventType": event.eventType,
-        "timestamp": event.deviceTime or server_time,
-        "serverTime": server_time,
+        "event_id": event.eventId,
+        "user_id": user["id"],
+        "workplace_id": workplace["id"],
+        "event_type": event.eventType,
+        "device_time": (event.deviceTime or server_time).isoformat(),
+        "received_at": server_time.isoformat(),
         "latitude": event.latitude,
         "longitude": event.longitude,
-        "accuracy": event.accuracy,
-        "distance": distance,
-        "suggestion": suggestion
+        "accuracy": event.accuracy
     }
     
-    await db.geofence_events.insert_one(geofence_doc)
+    await db.create_geofence_event(geofence_doc)
     
     return {
         "processed": True,
@@ -926,45 +678,48 @@ async def get_timesheet(
     if not to_date:
         to_date = datetime.utcnow().strftime("%Y-%m-%d")
     
-    # Get all punches in date range
-    punches = await db.punches.find({
-        "userId": user["_id"],
-        "date": {"$gte": from_date, "$lte": to_date}
-    }).sort("occurredAt", 1).to_list(1000)
-    
     # Get active workplace for workday info
     active_workplace = None
-    if user.get("activeWorkplaceId"):
-        active_workplace = await db.workplaces.find_one({"_id": user["activeWorkplaceId"]})
+    active_workplace_id = user.get("active_workplace_id")
+    if active_workplace_id:
+        active_workplace = await db.find_workplace_by_id(active_workplace_id, user["id"])
+    
+    # Get all punches in date range
+    punches_data = await db.find_punches_by_date_range(
+        user["id"], 
+        active_workplace_id if active_workplace_id else "dummy",
+        from_date, 
+        to_date
+    )
     
     # Group by date
     days = {}
-    for punch in punches:
+    for punch in punches_data:
         date = punch["date"]
         if date not in days:
             days[date] = {
                 "punches": [],
-                "workplaceId": str(punch["workplaceId"]),
-                "workplaceName": punch["workplaceName"],
+                "workplaceId": punch["workplace_id"],
+                "workplaceName": punch["workplace_name"],
                 "anomalies": []
             }
         
         days[date]["punches"].append({
-            "id": str(punch["_id"]),
-            "type": punch["punchType"],
-            "occurredAt": punch["occurredAt"],
+            "id": punch["id"],
+            "type": punch["punch_type"],
+            "occurredAt": datetime.fromisoformat(punch["occurred_at"]),
             "method": punch["method"],
-            "outsideWorkplace": punch["outsideWorkplace"],
-            "distance": punch["distanceToWorkplaceMeters"],
-            "accuracy": punch["accuracyMeters"],
+            "outsideWorkplace": punch["outside_workplace"],
+            "distance": float(punch["distance_to_workplace_meters"]),
+            "accuracy": float(punch["accuracy_meters"]),
             "note": punch.get("note"),
-            "mapsLink": generate_maps_link(punch["latitude"], punch["longitude"])
+            "mapsLink": generate_maps_link(float(punch["latitude"]), float(punch["longitude"]))
         })
         
-        if punch["outsideWorkplace"]:
-            days[date]["anomalies"].append(f"{punch['punchType']}: fora do local")
-        if punch["accuracyMeters"] > 50:
-            days[date]["anomalies"].append(f"{punch['punchType']}: GPS impreciso ({int(punch['accuracyMeters'])}m)")
+        if punch["outside_workplace"]:
+            days[date]["anomalies"].append(f"{punch['punch_type']}: fora do local")
+        if float(punch["accuracy_meters"]) > 50:
+            days[date]["anomalies"].append(f"{punch['punch_type']}: GPS impreciso ({int(float(punch['accuracy_meters']))}m)")
     
     # Calculate summaries
     result = []
@@ -1049,14 +804,24 @@ async def get_today_status(user = Depends(get_current_user)):
     
     # Get active workplace
     workplace = None
-    if user.get("activeWorkplaceId"):
-        workplace = await db.workplaces.find_one({"_id": user["activeWorkplaceId"]})
+    active_workplace_id = user.get("active_workplace_id")
+    if active_workplace_id:
+        workplace = await db.find_workplace_by_id(active_workplace_id, user["id"])
     
     # Get today's punches
-    punches = await db.punches.find({
-        "userId": user["_id"],
+    punches_data = await db.find_punches({
+        "user_id": user["id"],
         "date": today
-    }).sort("occurredAt", 1).to_list(100)
+    })
+    
+    # Convert to expected format and sort
+    punches = []
+    for p in punches_data:
+        p_copy = p.copy()
+        p_copy["occurredAt"] = datetime.fromisoformat(p["occurred_at"])
+        punches.append(p_copy)
+    
+    punches.sort(key=lambda x: x["occurredAt"])
     
     # Process punches
     punch_data = {
@@ -1068,13 +833,13 @@ async def get_today_status(user = Depends(get_current_user)):
     current_break_start = None
     
     for p in punches:
-        if p["punchType"] == "IN":
+        if p["punch_type"] == "IN":
             punch_data["in"] = p
-        elif p["punchType"] == "OUT":
+        elif p["punch_type"] == "OUT":
             punch_data["out"] = p
-        elif p["punchType"] == "BREAK_START":
+        elif p["punch_type"] == "BREAK_START":
             current_break_start = p
-        elif p["punchType"] == "BREAK_END" and current_break_start:
+        elif p["punch_type"] == "BREAK_END" and current_break_start:
             punch_data["breaks"].append({
                 "start": current_break_start,
                 "end": p
@@ -1125,14 +890,14 @@ async def get_today_status(user = Depends(get_current_user)):
         "date": today,
         "isScheduledWorkday": is_workday_flag,
         "workplace": {
-            "id": str(workplace["_id"]) if workplace else None,
+            "id": workplace["id"] if workplace else None,
             "name": workplace["name"] if workplace else None,
-            "latitude": workplace["latitude"] if workplace else None,
-            "longitude": workplace["longitude"] if workplace else None,
-            "radiusMeters": workplace["radiusMeters"] if workplace else None,
+            "latitude": float(workplace["latitude"]) if workplace else None,
+            "longitude": float(workplace["longitude"]) if workplace else None,
+            "radiusMeters": workplace["radius_meters"] if workplace else None,
             "workdays": workplace.get("workdays") if workplace else None,
             "schedule": workplace.get("schedule") if workplace else None,
-            "mapsLink": generate_maps_link(workplace["latitude"], workplace["longitude"]) if workplace else None
+            "mapsLink": generate_maps_link(float(workplace["latitude"]), float(workplace["longitude"])) if workplace else None
         } if workplace else None,
         "punchIn": {
             "occurredAt": punch_data["in"]["occurredAt"],
@@ -1175,25 +940,37 @@ async def export_csv(
         to_date = datetime.utcnow().strftime("%Y-%m-%d")
     
     # Get user's workplaces
-    workplaces = {str(w["_id"]): w async for w in db.workplaces.find({"userId": user["_id"]})}
+    workplaces_list = await db.find_workplaces_by_user(user["id"])
+    workplaces = {w["id"]: w for w in workplaces_list}
     
     # Get punches
-    punches = await db.punches.find({
-        "userId": user["_id"],
-        "date": {"$gte": from_date, "$lte": to_date}
-    }).sort("occurredAt", 1).to_list(10000)
+    active_workplace_id = user.get("active_workplace_id")
+    punches_data = await db.find_punches_by_date_range(
+        user["id"],
+        active_workplace_id if active_workplace_id else "dummy",
+        from_date,
+        to_date
+    )
     
     # Group by date
     days = {}
-    for punch in punches:
+    for punch in punches_data:
         date = punch["date"]
         if date not in days:
             days[date] = {
-                "workplaceId": str(punch["workplaceId"]),
-                "workplaceName": punch["workplaceName"],
+                "workplaceId": punch["workplace_id"],
+                "workplaceName": punch["workplace_name"],
                 "punches": []
             }
-        days[date]["punches"].append(punch)
+        
+        # Convert punch data
+        punch_copy = punch.copy()
+        punch_copy["occurredAt"] = datetime.fromisoformat(punch["occurred_at"])
+        punch_copy["punchType"] = punch["punch_type"]
+        punch_copy["outsideWorkplace"] = punch["outside_workplace"]
+        punch_copy["distanceToWorkplaceMeters"] = float(punch["distance_to_workplace_meters"])
+        punch_copy["accuracyMeters"] = float(punch["accuracy_meters"])
+        days[date]["punches"].append(punch_copy)
     
     # Create CSV
     output = io.StringIO()
@@ -1301,23 +1078,35 @@ async def export_xlsx(
         to_date = datetime.utcnow().strftime("%Y-%m-%d")
     
     # Get data (same as CSV)
-    workplaces = {str(w["_id"]): w async for w in db.workplaces.find({"userId": user["_id"]})}
+    workplaces_list = await db.find_workplaces_by_user(user["id"])
+    workplaces = {w["id"]: w for w in workplaces_list}
     
-    punches = await db.punches.find({
-        "userId": user["_id"],
-        "date": {"$gte": from_date, "$lte": to_date}
-    }).sort("occurredAt", 1).to_list(10000)
+    active_workplace_id = user.get("active_workplace_id")
+    punches_data = await db.find_punches_by_date_range(
+        user["id"],
+        active_workplace_id if active_workplace_id else "dummy",
+        from_date,
+        to_date
+    )
     
     days = {}
-    for punch in punches:
+    for punch in punches_data:
         date = punch["date"]
         if date not in days:
             days[date] = {
-                "workplaceId": str(punch["workplaceId"]),
-                "workplaceName": punch["workplaceName"],
+                "workplaceId": punch["workplace_id"],
+                "workplaceName": punch["workplace_name"],
                 "punches": []
             }
-        days[date]["punches"].append(punch)
+        
+        # Convert punch data
+        punch_copy = punch.copy()
+        punch_copy["occurredAt"] = datetime.fromisoformat(punch["occurred_at"])
+        punch_copy["punchType"] = punch["punch_type"]
+        punch_copy["outsideWorkplace"] = punch["outside_workplace"]
+        punch_copy["distanceToWorkplaceMeters"] = float(punch["distance_to_workplace_meters"])
+        punch_copy["accuracyMeters"] = float(punch["accuracy_meters"])
+        days[date]["punches"].append(punch_copy)
     
     # Create workbook
     wb = Workbook()
@@ -1459,63 +1248,15 @@ async def health_check():
 
 @api_router.post("/seed")
 async def seed_data():
-    """Seed initial data"""
-    
-    # Check if test user exists
-    test_user = await db.users.find_one({"email": "teste@geopunch.pt"})
-    if not test_user:
-        user_doc = {
-            "email": "teste@geopunch.pt",
-            "password_hash": hash_password("teste123"),
-            "name": "Utilizador Teste",
-            "employeeId": "EMP001",
-            "role": "employee",
-            "activeWorkplaceId": None,
-            "createdAt": datetime.utcnow(),
-            "lastLogin": None,
-            "loginCount": 0
-        }
-        result = await db.users.insert_one(user_doc)
-        test_user = user_doc
-        test_user["_id"] = result.inserted_id
-        
-        # Create sample workplace
-        workplace_doc = {
-            "userId": test_user["_id"],
-            "name": "Escritório Principal",
-            "latitude": 38.7223,
-            "longitude": -9.1393,
-            "radiusMeters": 150,
-            "workdays": {
-                "monday": True,
-                "tuesday": True,
-                "wednesday": True,
-                "thursday": True,
-                "friday": True,
-                "saturday": False,
-                "sunday": False
-            },
-            "schedule": {
-                "startTime": "09:00",
-                "endTime": "18:00",
-                "marginMinutes": 120
-            },
-            "locationLocked": True,
-            "configuredAt": datetime.utcnow(),
-            "createdAt": datetime.utcnow(),
-            "versionHistory": []
-        }
-        wp_result = await db.workplaces.insert_one(workplace_doc)
-        
-        # Set as active
-        await db.users.update_one(
-            {"_id": test_user["_id"]},
-            {"$set": {"activeWorkplaceId": wp_result.inserted_id}}
-        )
-        
-        logger.info("Test user and workplace created")
-    
-    return {"message": "Dados de teste criados com sucesso"}
+    """
+    Seed initial data
+    Note: This is a legacy endpoint. With Supabase Auth, users should register
+    through the auth system. This endpoint is kept for testing purposes only.
+    """
+    return {
+        "message": "Seed endpoint deprecated.",
+        "info": "Please use Supabase Auth to register users. Profiles are created automatically."
+    }
 
 # Include router and CORS
 app.include_router(api_router)
@@ -1530,12 +1271,10 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    await db.users.create_index("email", unique=True)
-    await db.punches.create_index([("userId", 1), ("date", 1), ("punchType", 1)])
-    await db.workplaces.create_index([("userId", 1)])
-    await db.geofence_events.create_index("eventId", unique=True)
-    logger.info("Database indexes created")
+    # Supabase manages indexes through SQL schema
+    logger.info("Application started - using Supabase")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    client.close()
+    # Supabase client doesn't need explicit closing
+    logger.info("Application shutting down")
