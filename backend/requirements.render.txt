@@ -1,0 +1,12 @@
+fastapi==0.110.1
+uvicorn[standard]==0.29.0
+python-dotenv==1.2.1
+pydantic==2.12.5
+email-validator==2.3.0
+python-jose==3.5.0
+python-multipart==0.0.22
+supabase==2.3.0
+postgrest==0.13.0
+openpyxl==3.1.5
+PyJWT==2.11.0
+httpx==0.24.1
