@@ -1,5 +1,7 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { Session } from '@supabase/supabase-js';
+import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 import { clearStoredTokens, storeSessionTokens, supabase } from '../config/supabase';
 import { supabaseProfileService } from '../services/supabaseProfile';
 import { User } from '../types';
@@ -21,13 +23,36 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const loggingOut = useRef(false);
+  const activeLoginRef = useRef(false);
+
+  const logSupabaseToken = useCallback((source: string, currentSession: Session | null) => {
+    if (!currentSession) {
+      console.log(`[AUTH][${source}] No session/token returned by Supabase`);
+      return;
+    }
+
+    console.log(`[AUTH][${source}] access_token:`, currentSession.access_token ?? null);
+    console.log(`[AUTH][${source}] refresh_token:`, currentSession.refresh_token ?? null);
+    console.log(`[AUTH][${source}] expires_at:`, currentSession.expires_at ?? null);
+  }, []);
 
   const fetchUserProfile = useCallback(async () => {
     try {
       const userData = await supabaseProfileService.getProfile();
+      if (!userData) {
+        console.warn('No user profile found');
+        // Don't force logout during active login/register — profile may not exist yet
+        if (!activeLoginRef.current) {
+          setUser(null);
+        }
+        return;
+      }
       setUser(userData);
     } catch (error: any) {
       console.error('❌ Error fetching user profile:', error);
+      // Don't force logout — the session is valid even if the profile fetch fails
+      // (e.g., network issue, backend cold start, Supabase latency)
       setUser(null);
     }
   }, []);
@@ -60,9 +85,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           return;
         }
         setSession(data.session);
+        logSupabaseToken('checkAuth.refreshSession', data.session);
         await storeSessionTokens(data.session);
       } else {
         setSession(session);
+        logSupabaseToken('checkAuth.getSession', session);
         await storeSessionTokens(session);
       }
 
@@ -77,109 +104,165 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       await clearStoredTokens();
       setIsLoading(false);
     }
-  }, [fetchUserProfile]);
+  }, [fetchUserProfile, logSupabaseToken]);
 
   useEffect(() => {
     // Check for existing session on mount
     checkAuth();
 
     // Listen for auth state changes
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      setSession(session);
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      // If we're in the middle of logging out or actively logging in, ignore events
+      if (loggingOut.current || activeLoginRef.current) {
+        return;
+      }
 
-      if (event === 'SIGNED_OUT' || !session) {
-        await clearStoredTokens();
+      if (event === 'SIGNED_OUT' || !newSession) {
+        setSession(null);
         setUser(null);
-      } else if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') {
-        await storeSessionTokens(session);
+        await clearStoredTokens();
+      } else if (event === 'TOKEN_REFRESHED') {
+        setSession(newSession);
+        logSupabaseToken('onAuthStateChange.TOKEN_REFRESHED', newSession);
+        await storeSessionTokens(newSession);
+      } else if (event === 'SIGNED_IN') {
+        setSession(newSession);
+        logSupabaseToken('onAuthStateChange.SIGNED_IN', newSession);
+        await storeSessionTokens(newSession);
         await fetchUserProfile();
-      } else if (session) {
-        await storeSessionTokens(session);
-        await fetchUserProfile();
+      } else if (newSession) {
+        setSession(newSession);
+        logSupabaseToken(`onAuthStateChange.${event}`, newSession);
+        await storeSessionTokens(newSession);
       }
     });
 
     return () => {
       authListener.subscription.unsubscribe();
     };
-  }, [checkAuth, fetchUserProfile]);
+  }, [checkAuth, fetchUserProfile, logSupabaseToken]);
 
   const login = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    activeLoginRef.current = true;
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) {
-      console.error('❌ Supabase login error:', error);
-      throw error;
-    }
+      if (error) {
+        console.error('❌ Supabase login error:', error);
+        throw error;
+      }
 
-    setSession(data.session);
-    await storeSessionTokens(data.session);
-    
-    if (data.session) {
-      await fetchUserProfile();
+      setSession(data.session);
+      logSupabaseToken('login.signInWithPassword', data.session);
+      await storeSessionTokens(data.session);
+      
+      if (data.session) {
+        await fetchUserProfile();
+      }
+    } finally {
+      activeLoginRef.current = false;
     }
   };
 
   const register = async (email: string, password: string, name: string, employeeId?: string) => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          name,
-          employee_id: employeeId,
-        },
-      },
-    });
-
-    if (error) {
-      console.error('❌ Supabase signup error:', error);
-      throw error;
-    }
-
-    if (data.session && data.user) {
-      setSession(data.session);
-      await storeSessionTokens(data.session);
-      
-      try {
-        // Small delay to ensure trigger completes
-        await new Promise(resolve => setTimeout(resolve, 500));
-        await fetchUserProfile();
-      } catch (profileError: any) {
-        console.error('❌ Error fetching profile after registration:', profileError);
-        
-        // Fallback: manually create profile if trigger failed
-        try {
-          const profile = await supabaseProfileService.createProfile({
-            id: data.user.id,
-            email,
+    activeLoginRef.current = true;
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
             name,
             employee_id: employeeId,
-          });
-          setUser(profile);
-        } catch (createError: any) {
-          // If profile already exists (from trigger), fetch it
-          if (createError.code === '23505') {
-            await fetchUserProfile();
-          } else {
-            throw new Error('Erro ao criar perfil: ' + (createError.message || 'Erro desconhecido'));
+          },
+        },
+      });
+
+      if (error) {
+        console.error('❌ Supabase signup error:', error);
+        throw error;
+      }
+
+      logSupabaseToken('register.signUp', data.session);
+
+      if (data.session && data.user) {
+        setSession(data.session);
+        await storeSessionTokens(data.session);
+        
+        try {
+          // Small delay to ensure trigger completes
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          await fetchUserProfile();
+        } catch (profileError: any) {
+          console.error('❌ Error fetching profile after registration:', profileError);
+          
+          // Fallback: manually create profile if trigger failed
+          try {
+            const profile = await supabaseProfileService.createProfile({
+              id: data.user.id,
+              email,
+              name,
+              employee_id: employeeId,
+            });
+            setUser(profile);
+          } catch (createError: any) {
+            // If profile already exists (from trigger), fetch it
+            if (createError.code === '23505') {
+              await fetchUserProfile();
+            } else {
+              throw new Error('Erro ao criar perfil: ' + (createError.message || 'Erro desconhecido'));
+            }
           }
         }
+      } else {
+        // Email confirmation required
+        throw new Error('Registro criado! Verifique seu email para confirmar a conta antes de fazer login.');
       }
-    } else {
-      // Email confirmation required
-      throw new Error('Registro criado! Verifique seu email para confirmar a conta antes de fazer login.');
+    } finally {
+      activeLoginRef.current = false;
     }
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
-    await clearStoredTokens();
+    // Set flag to prevent onAuthStateChange from re-setting session
+    loggingOut.current = true;
+
+    // Immediately clear React state — this makes isAuthenticated false
     setSession(null);
     setUser(null);
+    setIsLoading(false);
+
+    // Clear persisted tokens
+    try {
+      await clearStoredTokens();
+    } catch (e) {
+      console.error('Error clearing tokens (ignored):', e);
+    }
+
+    // Tell Supabase SDK to clear its internal session cache
+    try {
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch (e) {
+      console.error('Error during signOut (ignored):', e);
+    }
+
+    // Also manually remove the Supabase SDK's own storage keys
+    try {
+      const storageKey = `sb-${new URL(process.env.EXPO_PUBLIC_SUPABASE_URL!).hostname.split('.')[0]}-auth-token`;
+      if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+        localStorage.removeItem(storageKey);
+      } else {
+        await SecureStore.deleteItemAsync(storageKey);
+      }
+    } catch (e) {
+      // Key might not exist or format might differ, that's ok
+      void e;
+    }
+
+    loggingOut.current = false;
   };
 
   const refreshUser = async () => {

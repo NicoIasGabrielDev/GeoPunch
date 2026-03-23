@@ -209,8 +209,8 @@ Authorization: Bearer <supabase-jwt-token>
 
 O backend:
 1. Extrai o token do header
-2. Valida com `SUPABASE_JWT_SECRET`
-3. Extrai `user_id` do token
+2. Valida via JWKS (chave pública ECC P-256 do Supabase) com fallback para legacy HS256
+3. Extrai `user_id` do claim `sub`
 4. Carrega perfil da tabela `profiles`
 5. Atualiza `last_login`
 6. Disponibiliza `user` no endpoint via dependency injection
@@ -451,7 +451,7 @@ Por default, tokens Supabase expiram em 1h. Para alterar:
 1. **JWT Secret ≠ Anon Key ≠ Service Role Key**
    - `SUPABASE_KEY` (anon/public): Usado pelo Supabase Client no mobile/web app
    - `SUPABASE_SERVICE_ROLE_KEY` (secret): Usado pelo backend Python para queries diretas
-   - `SUPABASE_JWT_SECRET`: Usado pelo backend para validar tokens JWT
+   - `SUPABASE_JWT_SECRET`: Usado como fallback legacy (HS256). A validação primária usa JWKS via `SUPABASE_URL`
    - **Nunca exponhas service_role ou jwt_secret ao cliente!**
 
 2. **Por que Service Role Key no Backend?**

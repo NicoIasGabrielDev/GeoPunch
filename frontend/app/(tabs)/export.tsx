@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { timesheetApi } from '../../src/services/api';
+import { timesheetService } from '../../src/services/backend';
 
 export default function ExportScreen() {
   const [fromDate, setFromDate] = useState(() => {
@@ -35,13 +35,13 @@ export default function ExportScreen() {
   const handleExport = async (format: 'csv' | 'xlsx') => {
     setLoading(format);
     try {
-      const response = format === 'csv'
-        ? await timesheetApi.exportCsv(fromDate, toDate)
-        : await timesheetApi.exportXlsx(fromDate, toDate);
+      const data = format === 'csv'
+        ? await timesheetService.exportCsv(fromDate, toDate)
+        : await timesheetService.exportXlsx(fromDate, toDate);
 
       if (Platform.OS === 'web') {
         // For web, create a download link
-        const blob = new Blob([response.data], {
+        const blob = new Blob([data], {
           type: format === 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         });
         const url = window.URL.createObjectURL(blob);
@@ -70,7 +70,7 @@ export default function ExportScreen() {
             Alert.alert('Erro', 'Partilha não disponível neste dispositivo');
           }
         };
-        reader.readAsDataURL(response.data);
+        reader.readAsDataURL(data);
       }
     } catch (error: any) {
       console.error('Export error:', error);

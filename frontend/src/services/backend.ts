@@ -1,5 +1,6 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
-import { getAccessToken } from '../config/supabase';
+import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from 'axios';
+import { getAccessToken, getStoredAccessToken, refreshAuthSession, supabase } from '../config/supabase';
+import { ScheduleConfig, WorkdaysConfig } from '../types';
 
 // Get backend URL from environment
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
@@ -13,17 +14,162 @@ const backendApi: AxiosInstance = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 30000,
+  timeout: 60000,
 });
+
+/** Race a promise against a timeout; resolves null on timeout */
+const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T | null> =>
+  Promise.race([
+    promise,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+
+type RetriableRequestConfig = InternalAxiosRequestConfig & {
+  _retry?: boolean;
+};
+
+type WorkplacePayloadInput = {
+  name: string;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
+  radiusMeters?: number | string | null;
+  workdays?: Partial<WorkdaysConfig> | null;
+  schedule?: Partial<ScheduleConfig> | null;
+  startTime?: string;
+  endTime?: string;
+  allowedMarginMinutes?: number | string | null;
+  marginMinutes?: number | string | null;
+};
+
+const DEFAULT_WORKDAYS: WorkdaysConfig = {
+  monday: true,
+  tuesday: true,
+  wednesday: true,
+  thursday: true,
+  friday: true,
+  saturday: false,
+  sunday: false,
+};
+
+const toOptionalNumber = (value: number | string | null | undefined): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  return undefined;
+};
+
+const toOptionalInteger = (value: number | string | null | undefined): number | undefined => {
+  const parsed = toOptionalNumber(value);
+  return parsed === undefined ? undefined : Math.trunc(parsed);
+};
+
+const normalizeSchedule = (data: WorkplacePayloadInput): ScheduleConfig | undefined => {
+  const startTime = data.schedule?.startTime ?? data.startTime;
+  const endTime = data.schedule?.endTime ?? data.endTime;
+  const marginMinutes = toOptionalInteger(
+    data.schedule?.marginMinutes ?? data.marginMinutes ?? data.allowedMarginMinutes,
+  );
+
+  if (!startTime || !endTime || marginMinutes === undefined) {
+    return undefined;
+  }
+
+  return {
+    startTime,
+    endTime,
+    marginMinutes,
+  };
+};
+
+const normalizeWorkdays = (
+  workdays: Partial<WorkdaysConfig> | null | undefined,
+  includeDefaults: boolean,
+): WorkdaysConfig | undefined => {
+  if (!workdays && !includeDefaults) {
+    return undefined;
+  }
+
+  return {
+    ...DEFAULT_WORKDAYS,
+    ...(workdays ?? {}),
+  };
+};
+
+const normalizeWorkplacePayload = (
+  data: WorkplacePayloadInput,
+  options: { requireCoordinates: boolean; includeDefaultWorkdays: boolean },
+) => {
+  const latitude = toOptionalNumber(data.latitude);
+  const longitude = toOptionalNumber(data.longitude);
+  const radiusMeters = toOptionalInteger(data.radiusMeters) ?? 150;
+  const workdays = normalizeWorkdays(data.workdays, options.includeDefaultWorkdays);
+  const schedule = normalizeSchedule(data);
+
+  if (options.requireCoordinates && (latitude === undefined || longitude === undefined)) {
+    throw new Error('Localizacao invalida para o local de trabalho');
+  }
+
+  return {
+    name: data.name.trim(),
+    ...(latitude !== undefined ? { latitude } : {}),
+    ...(longitude !== undefined ? { longitude } : {}),
+    radiusMeters,
+    ...(workdays ? { workdays } : {}),
+    ...(schedule ? { schedule } : {}),
+  };
+};
+
+const setAuthorizationHeader = (config: InternalAxiosRequestConfig, token: string | null) => {
+  if (!config.headers) {
+    return;
+  }
+
+  if (token) {
+    if (typeof config.headers.set === 'function') {
+      config.headers.set('Authorization', `Bearer ${token}`);
+      return;
+    }
+
+    config.headers.Authorization = `Bearer ${token}`;
+    return;
+  }
+
+  if (typeof config.headers.delete === 'function') {
+    config.headers.delete('Authorization');
+    return;
+  }
+
+  delete config.headers.Authorization;
+};
 
 // Request interceptor to add Supabase JWT token
 backendApi.interceptors.request.use(
   async (config) => {
     try {
-      const token = await getAccessToken();
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
+      let token = await withTimeout(getAccessToken(), 10000);
+
+      // Fallback: read session directly from Supabase SDK if primary path failed
+      if (!token) {
+        console.warn('⚠️ getAccessToken() returned null, trying direct Supabase session');
+        try {
+          const { data } = await supabase.auth.getSession();
+          token = data.session?.access_token ?? null;
+        } catch {
+          // ignore — will proceed without token
+        }
       }
+
+      if (__DEV__ && !token) {
+        console.warn('⚠️ No auth token available for request:', config.url);
+      }
+
+      setAuthorizationHeader(config, token);
     } catch (error) {
       console.error('❌ Error getting access token:', error);
     }
@@ -35,9 +181,45 @@ backendApi.interceptors.request.use(
 // Response interceptor for error handling
 backendApi.interceptors.response.use(
   (response) => response,
-  (error: AxiosError) => {
-    console.error('❌ Request failed:', error.config?.url, '- Status:', error.response?.status);
-    console.error('❌ Error:', error.response?.data || error.message);
+  async (error: AxiosError) => {
+    const originalRequest = error.config as RetriableRequestConfig | undefined;
+
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+      originalRequest._retry = true;
+
+      try {
+        // Try refreshing via Supabase SDK
+        const refreshedSession = await withTimeout(refreshAuthSession(), 10000);
+        let refreshedToken = refreshedSession?.access_token ?? null;
+
+        // Fallback: read stored token if refresh didn't return a new one
+        if (!refreshedToken) {
+          refreshedToken = await getStoredAccessToken();
+        }
+
+        // Last resort: try direct Supabase session
+        if (!refreshedToken) {
+          try {
+            const { data } = await supabase.auth.getSession();
+            refreshedToken = data.session?.access_token ?? null;
+          } catch {
+            // ignore
+          }
+        }
+
+        if (refreshedToken) {
+          setAuthorizationHeader(originalRequest, refreshedToken);
+          return backendApi.request(originalRequest);
+        }
+      } catch (refreshError) {
+        console.error('❌ Error refreshing session after 401:', refreshError);
+      }
+    }
+
+    if (__DEV__) {
+      console.error('❌ Request failed:', error.config?.url, '- Status:', error.response?.status);
+      console.error('❌ Error:', error.response?.data || error.message);
+    }
     return Promise.reject(error);
   }
 );
@@ -51,15 +233,6 @@ backendApi.interceptors.response.use(
  * Get current user profile from backend
  */
 export const authService = {
-  /**
-   * Register user in backend
-   * Called after Supabase registration to create user in backend database
-   */
-  register: async (data: { email: string; password: string; name: string; employeeId?: string }) => {
-    const response = await backendApi.post('/auth/register', data);
-    return response.data;
-  },
-
   /**
    * Get current user profile
    * Backend validates the Supabase JWT and returns user data
@@ -86,36 +259,22 @@ export const workplaceService = {
   /**
    * Create a new workplace
    */
-  create: async (data: {
-    name: string;
-    latitude: number;
-    longitude: number;
-    radiusMeters: number;
-    workdays: {
-      monday: boolean;
-      tuesday: boolean;
-      wednesday: boolean;
-      thursday: boolean;
-      friday: boolean;
-      saturday: boolean;
-      sunday: boolean;
-    };
-    schedule?: {
-      startTime: string;
-      endTime: string;
-      marginMinutes: number;
-    };
-    locationLocked?: boolean;
-  }) => {
-    const response = await backendApi.post('/workplaces', data);
+  create: async (data: WorkplacePayloadInput) => {
+    const response = await backendApi.post('/workplaces', normalizeWorkplacePayload(data, {
+      requireCoordinates: true,
+      includeDefaultWorkdays: true,
+    }));
     return response.data;
   },
 
   /**
    * Update an existing workplace
    */
-  update: async (id: string, data: any) => {
-    const response = await backendApi.put(`/workplaces/${id}`, data);
+  update: async (id: string, data: WorkplacePayloadInput) => {
+    const response = await backendApi.put(`/workplaces/${id}`, normalizeWorkplacePayload(data, {
+      requireCoordinates: false,
+      includeDefaultWorkdays: false,
+    }));
     return response.data;
   },
 

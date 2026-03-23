@@ -8,13 +8,14 @@ import {
   Alert,
   Platform,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { timesheetApi, punchApi, workplaceApi } from '../../src/services/api';
+import { timesheetService, punchService, workplaceService } from '../../src/services/backend';
 import { StatusCard } from '../../src/components/StatusCard';
 import { Button } from '../../src/components/Button';
 import { TodayStatus, Workplace, LocationData } from '../../src/types';
@@ -54,7 +55,7 @@ export default function HomeScreen() {
         setLoading(false);
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [])
+    }, [isAuthenticated])
   );
 
   useEffect(() => {
@@ -171,12 +172,12 @@ export default function HomeScreen() {
 
     try {
       setLoading(true);
-      const [statusRes, workplaceRes] = await Promise.all([
-        timesheetApi.getTodayStatus(),
-        workplaceApi.getActive(),
+      const [statusData, workplaceData] = await Promise.all([
+        timesheetService.getTodayStatus(),
+        workplaceService.getActive(),
       ]);
-      setTodayStatus(statusRes.data ?? null);
-      setWorkplace(statusRes.data?.workplace ?? workplaceRes.data ?? null);
+      setTodayStatus(statusData ?? null);
+      setWorkplace(statusData?.workplace ?? workplaceData ?? null);
       await updateLocation();
     } catch (error: any) {
       console.error('Error loading data:', error);
@@ -231,12 +232,12 @@ export default function HomeScreen() {
   const executePunch = async (punchType: 'IN' | 'OUT') => {
     setActionLoading(punchType);
     try {
-      await punchApi.create({
+      await punchService.create({
         punchType,
         latitude: currentLocation!.latitude,
         longitude: currentLocation!.longitude,
         accuracy: currentLocation!.accuracy,
-        method: 'manual',
+        method: 'MANUAL',
       });
       Alert.alert('Sucesso', punchType === 'IN' ? 'Entrada registada' : 'Saída registada');
       await loadData();
@@ -256,12 +257,12 @@ export default function HomeScreen() {
 
     setActionLoading(breakType);
     try {
-      await punchApi.create({
+      await punchService.create({
         punchType: breakType,
         latitude: currentLocation.latitude,
         longitude: currentLocation.longitude,
         accuracy: currentLocation.accuracy,
-        method: 'manual',
+        method: 'MANUAL',
       });
       Alert.alert('Sucesso', breakType === 'BREAK_START' ? 'Pausa iniciada' : 'Pausa terminada');
       await loadData();
@@ -415,6 +416,18 @@ export default function HomeScreen() {
       </View>
     );
   };
+
+  // Loading state
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.noWorkplaceContainer}>
+          <ActivityIndicator size="large" color="#1a73e8" />
+          <Text style={{ marginTop: 16, color: '#666', fontSize: 14 }}>A carregar...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   // No active workplace - prompt to configure
   if (!workplace && !loading) {

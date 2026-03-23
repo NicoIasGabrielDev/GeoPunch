@@ -1,12 +1,12 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, validator
-from typing import List, Optional, Literal, Dict
+from typing import List, Optional, Literal, Dict, Any
 import uuid
 from datetime import datetime, timedelta, time, timezone
 import io
@@ -337,7 +337,7 @@ async def set_active_workplace(workplace_id: str, user = Depends(get_current_use
     
     return {"message": f"'{workplace['name']}' definido como local de trabalho ativo"}
 
-@api_router.get("/workplaces/active", response_model=Optional[WorkplaceResponse])
+@api_router.get("/workplaces/active")
 async def get_active_workplace(user = Depends(get_current_user)):
     """Get the currently active workplace"""
     active_workplace_id = user.get("active_workplace_id")
@@ -567,7 +567,7 @@ async def process_geofence_event(event: GeofenceEventCreate, user = Depends(get_
         return {
             "processed": True,
             "duplicate": True,
-            "suggestion": existing.get("suggestion"),
+            "suggestion": None,
             "message": "Evento já processado"
         }
     
@@ -902,12 +902,12 @@ async def get_today_status(user = Depends(get_current_user)):
         "punchIn": {
             "occurredAt": punch_data["in"]["occurredAt"],
             "method": punch_data["in"]["method"],
-            "outsideWorkplace": punch_data["in"]["outsideWorkplace"]
+            "outsideWorkplace": punch_data["in"]["outside_workplace"]
         } if punch_data["in"] else None,
         "punchOut": {
             "occurredAt": punch_data["out"]["occurredAt"],
             "method": punch_data["out"]["method"],
-            "outsideWorkplace": punch_data["out"]["outsideWorkplace"]
+            "outsideWorkplace": punch_data["out"]["outside_workplace"]
         } if punch_data["out"] else None,
         "breaks": [
             {
@@ -1235,6 +1235,112 @@ async def reverse_geocode(lat: float, lng: float, user = Depends(get_current_use
         "address": f"Lat: {lat:.6f}, Lng: {lng:.6f}",
         "mapsLink": generate_maps_link(lat, lng)
     }
+
+# ==================== ADMIN ENDPOINTS ====================
+# These endpoints are called by the mobile admin screen
+
+def require_admin(user: Dict):
+    """Check if user has admin role, raise 403 if not"""
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Acesso negado. Permissão de administrador necessária.")
+
+@api_router.get("/admin/workplaces")
+async def admin_list_workplaces(user = Depends(get_current_user)):
+    """List all workplaces (admin only)"""
+    require_admin(user)
+    try:
+        response = db.client.table('workplaces').select('*').execute()
+        workplaces = response.data or []
+        return [
+            WorkplaceResponse(
+                id=w["id"],
+                name=w["name"],
+                latitude=float(w["latitude"]),
+                longitude=float(w["longitude"]),
+                radiusMeters=w["radius_meters"],
+                workdays=w.get("workdays", {}),
+                schedule=w.get("schedule"),
+                locationLocked=w.get("location_locked", True),
+                configuredAt=datetime.fromisoformat(w.get("configured_at", w["created_at"])),
+                isActive=False,
+                createdAt=datetime.fromisoformat(w["created_at"])
+            )
+            for w in workplaces
+        ]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing all workplaces: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao listar locais de trabalho")
+
+@api_router.delete("/admin/workplaces/{workplace_id}")
+async def admin_delete_workplace(workplace_id: str, user = Depends(get_current_user)):
+    """Delete a workplace (admin only)"""
+    require_admin(user)
+    try:
+        db.client.table('workplaces').delete().eq('id', workplace_id).execute()
+        return {"message": "Local de trabalho eliminado"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting workplace: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao eliminar local de trabalho")
+
+class AssignWorkplaceRequest(BaseModel):
+    user_id: str
+    workplace_id: str
+
+@api_router.post("/admin/assign-workplace")
+async def admin_assign_workplace(data: AssignWorkplaceRequest, user = Depends(get_current_user)):
+    """Assign a workplace to a user (admin only)"""
+    require_admin(user)
+    await db.update_profile(data.user_id, {"active_workplace_id": data.workplace_id})
+    return {"message": "Local de trabalho atribuído com sucesso"}
+
+@api_router.get("/admin/users")
+async def admin_list_users(user = Depends(get_current_user)):
+    """List all user profiles (admin only)"""
+    require_admin(user)
+    try:
+        response = db.client.table('profiles').select('*').execute()
+        profiles = response.data or []
+        return [
+            UserResponse(
+                id=p["id"],
+                email=p["email"],
+                name=p["name"],
+                employeeId=p.get("employee_id"),
+                role=p["role"],
+                activeWorkplaceId=p.get("active_workplace_id"),
+                createdAt=datetime.fromisoformat(p["created_at"])
+            )
+            for p in profiles
+        ]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing users: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao listar utilizadores")
+
+# ==================== AUTH LEGACY STUBS ====================
+# These endpoints are called by older versions of the mobile client
+# Auth is now handled by Supabase Auth directly
+
+@api_router.post("/auth/register")
+async def register_legacy():
+    """Legacy endpoint - registration now handled by Supabase Auth"""
+    raise HTTPException(
+        status_code=410,
+        detail="Registo agora é feito via Supabase Auth. Use o método de registo do cliente Supabase."
+    )
+
+@api_router.post("/auth/login")
+async def login_legacy():
+    """Legacy endpoint - login now handled by Supabase Auth"""
+    raise HTTPException(
+        status_code=410,
+        detail="Login agora é feito via Supabase Auth. Use o método de login do cliente Supabase."
+    )
 
 # ==================== HEALTH & SEED ====================
 

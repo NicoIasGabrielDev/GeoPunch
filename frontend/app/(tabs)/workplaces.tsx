@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { workplaceApi } from '../../src/services/api';
+import { workplaceService } from '../../src/services/backend';
 import { Button } from '../../src/components/Button';
 import { Input } from '../../src/components/Input';
 import { MapPicker } from '../../src/components/MapPicker';
@@ -95,8 +95,8 @@ export default function WorkplacesScreen() {
   const loadWorkplaces = async () => {
     try {
       setLoading(true);
-      const response = await workplaceApi.list();
-      setWorkplaces(response.data ?? []);
+      const data = await workplaceService.list();
+      setWorkplaces(data ?? []);
     } catch (error) {
       console.error('Error loading workplaces:', error);
     } finally {
@@ -126,7 +126,7 @@ export default function WorkplacesScreen() {
 
   const handleSetActive = async (workplace: Workplace) => {
     try {
-      await workplaceApi.setActive(workplace.id);
+      await workplaceService.setActive(workplace.id);
       Alert.alert('Sucesso', `'${workplace.name}' definido como local ativo`);
       await loadWorkplaces();
     } catch (error: any) {
@@ -170,37 +170,39 @@ export default function WorkplacesScreen() {
       return;
     }
     
-    if (!wizardData.latitude || !wizardData.longitude) {
+    if (wizardData.latitude == null || wizardData.longitude == null) {
       Alert.alert('Erro', 'Selecione a localização no mapa');
       return;
     }
     
     setSaving(true);
     try {
+      const payload = editingWorkplace
+        ? {
+            name: wizardData.name,
+            radiusMeters: wizardData.radiusMeters,
+            workdays: wizardData.workdays,
+            schedule: wizardData.schedule,
+          }
+        : {
+            name: wizardData.name,
+            latitude: wizardData.latitude!,
+            longitude: wizardData.longitude!,
+            radiusMeters: wizardData.radiusMeters,
+            workdays: wizardData.workdays,
+            schedule: wizardData.schedule,
+          };
+
       if (editingWorkplace) {
-        await workplaceApi.update(editingWorkplace.id, {
-          name: wizardData.name,
-          radiusMeters: wizardData.radiusMeters,
-          workdays: wizardData.workdays,
-          schedule: wizardData.schedule,
-        });
+        await workplaceService.update(editingWorkplace.id, payload);
         Alert.alert('Sucesso', 'Local de trabalho atualizado');
       } else {
-        await workplaceApi.create({
-          name: wizardData.name,
-          latitude: wizardData.latitude,
-          longitude: wizardData.longitude,
-          radiusMeters: wizardData.radiusMeters,
-          workdays: wizardData.workdays,
-          schedule: wizardData.schedule,
-        });
-        Alert.alert('Sucesso', 'Local de trabalho criado com localização bloqueada');
+        await workplaceService.create(payload);
+        Alert.alert('Sucesso', 'Local de trabalho criado');
       }
       
       setWizardVisible(false);
-      await loadWorkplaces();
     } catch (error: any) {
-      console.error('Error saving workplace:', error);
       const detail = error.response?.data?.detail;
       const msg =
         (Array.isArray(detail) ? detail.map((d: any) => d.msg).join(', ') : detail) ||
@@ -210,6 +212,8 @@ export default function WorkplacesScreen() {
       Alert.alert('Erro', msg);
     } finally {
       setSaving(false);
+      // Reload list in background — don't block the button
+      loadWorkplaces().catch(() => {});
     }
   };
 
@@ -303,7 +307,7 @@ export default function WorkplacesScreen() {
             <Button
               title="Confirmar Localização"
               onPress={() => {
-                if (!wizardData.latitude || !wizardData.longitude) {
+                if (wizardData.latitude == null || wizardData.longitude == null) {
                   if (userLocation) {
                     setWizardData(prev => ({
                       ...prev,

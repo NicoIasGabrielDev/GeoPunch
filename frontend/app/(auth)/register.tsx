@@ -52,7 +52,7 @@ export default function RegisterScreen() {
       );
       router.replace('/(tabs)');
     } catch (error: any) {
-      const message = error.response?.data?.detail || 'Erro ao registar';
+      const message = error?.message || 'Erro ao registar';
       Alert.alert('Erro', message);
     } finally {
       setLoading(false);

@@ -41,7 +41,7 @@ export default function LoginScreen() {
       await login(email.toLowerCase().trim(), password);
       router.replace('/(tabs)');
     } catch (error: any) {
-      const message = error.response?.data?.detail || 'Erro ao fazer login';
+      const message = error?.message || 'Erro ao fazer login';
       Alert.alert('Erro', message);
     } finally {
       setLoading(false);

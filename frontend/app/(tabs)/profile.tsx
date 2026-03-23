@@ -26,7 +26,12 @@ export default function ProfileScreen() {
           text: 'Sair',
           style: 'destructive',
           onPress: async () => {
-            await logout();
+            try {
+              await logout();
+            } catch (e) {
+              console.error('Logout error (ignored):', e);
+            }
+            // Navigation is handled by tabs layout guard
             router.replace('/(auth)/login');
           },
         },

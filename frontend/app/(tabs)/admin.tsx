@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { workplaceApi, usersApi } from '../../src/services/api';
+import { workplaceService, adminService } from '../../src/services/backend';
 import { Button } from '../../src/components/Button';
 import { Input } from '../../src/components/Input';
 import { Workplace, User } from '../../src/types';
@@ -29,6 +29,7 @@ export default function AdminScreen() {
   const [editingWorkplace, setEditingWorkplace] = useState<Workplace | null>(null);
   const [assignModalVisible, setAssignModalVisible] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -46,12 +47,12 @@ export default function AdminScreen() {
     try {
       setLoading(true);
       
-      const [workplacesRes, usersRes] = await Promise.all([
-        workplaceApi.listAll(),
-        usersApi.list(),
+      const [workplacesData, usersData] = await Promise.all([
+        adminService.listWorkplaces(),
+        adminService.listUsers(),
       ]);
-      setWorkplaces(workplacesRes.data);
-      setUsers(usersRes.data);
+      setWorkplaces(workplacesData ?? []);
+      setUsers(usersData ?? []);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -102,6 +103,7 @@ export default function AdminScreen() {
   };
 
   const handleSave = async () => {
+    setSaving(true);
     try {
       const data = {
         name: formData.name,
@@ -114,10 +116,10 @@ export default function AdminScreen() {
       };
 
       if (editingWorkplace) {
-        await workplaceApi.update(editingWorkplace.id, data);
+        await workplaceService.update(editingWorkplace.id, data);
         Alert.alert('Sucesso', 'Local de trabalho atualizado');
       } else {
-        await workplaceApi.create(data);
+        await workplaceService.create(data);
         Alert.alert('Sucesso', 'Local de trabalho criado');
       }
 
@@ -126,6 +128,8 @@ export default function AdminScreen() {
     } catch (error: any) {
       const message = error.response?.data?.detail || 'Erro ao guardar';
       Alert.alert('Erro', message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -140,7 +144,7 @@ export default function AdminScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await workplaceApi.delete(workplace.id);
+              await adminService.deleteWorkplace(workplace.id);
               Alert.alert('Sucesso', 'Local de trabalho eliminado');
               loadData();
             } catch {
@@ -161,7 +165,7 @@ export default function AdminScreen() {
     if (!selectedUser) return;
 
     try {
-      await workplaceApi.assignToUser(selectedUser.id, workplaceId);
+      await adminService.assignWorkplace(selectedUser.id, workplaceId);
       Alert.alert('Sucesso', 'Local de trabalho atribuído');
       setAssignModalVisible(false);
       loadData();
@@ -338,6 +342,7 @@ export default function AdminScreen() {
               <Button
                 title="Guardar"
                 onPress={handleSave}
+                loading={saving}
                 style={{ flex: 1, marginLeft: 8 }}
               />
             </View>

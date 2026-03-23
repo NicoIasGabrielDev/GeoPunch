@@ -9,7 +9,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { timesheetApi } from '../../src/services/api';
+import { timesheetService } from '../../src/services/backend';
 import { DayTimesheet } from '../../src/types';
 
 export default function HistoryScreen() {
@@ -26,8 +26,8 @@ export default function HistoryScreen() {
   const loadTimesheet = async () => {
     try {
       setLoading(true);
-      const response = await timesheetApi.getTimesheet();
-      setTimesheet(response.data);
+      const data = await timesheetService.getTimesheet();
+      setTimesheet(data ?? []);
     } catch (error) {
       console.error('Error loading timesheet:', error);
     } finally {
@@ -62,7 +62,7 @@ export default function HistoryScreen() {
         return '#28a745';
       case 'working':
         return '#1a73e8';
-      case 'on_lunch':
+      case 'on_break':
         return '#ffc107';
       default:
         return '#6c757d';
@@ -75,7 +75,7 @@ export default function HistoryScreen() {
         return 'Completo';
       case 'working':
         return 'A trabalhar';
-      case 'on_lunch':
+      case 'on_break':
         return 'Em pausa';
       default:
         return 'Não iniciado';
