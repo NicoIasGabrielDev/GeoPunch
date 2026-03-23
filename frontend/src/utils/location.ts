@@ -32,12 +32,10 @@ export const requestLocationPermissions = async (): Promise<boolean> => {
       try {
         const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
         if (backgroundStatus !== 'granted') {
-          console.log('Background location permission not granted');
-          // Still return true - app can work without background location
-        }
-      } catch (bgError) {
+            // Still return true - app can work without background location
+          }
+      } catch {
         // Background permission might not be available in Expo Go
-        console.log('Background location not available:', bgError);
       }
     }
 
@@ -48,8 +46,6 @@ export const requestLocationPermissions = async (): Promise<boolean> => {
     // Check if this is the Expo Go Info.plist error
     if (error?.message?.includes('NSLocation') || error?.message?.includes('Info.plist')) {
       // This happens in Expo Go - permissions work in development/production builds
-      console.log('Location permissions not available in Expo Go. Use a development build for full functionality.');
-      // Return true to allow app to continue with mock/default location
       return false;
     }
     
@@ -62,7 +58,6 @@ export const getCurrentLocation = async (): Promise<Location.LocationObject | nu
     // First check if we can even use location services
     const servicesEnabled = await Location.hasServicesEnabledAsync();
     if (!servicesEnabled) {
-      console.log('Location services are disabled');
       return null;
     }
 
@@ -79,9 +74,8 @@ export const getCurrentLocation = async (): Promise<Location.LocationObject | nu
   } catch (error: any) {
     console.error('Error getting current location:', error);
     
-    // Handle Expo Go limitation gracefully
     if (error?.message?.includes('NSLocation') || error?.message?.includes('Info.plist')) {
-      console.log('Location not available in Expo Go');
+      // Handle Expo Go limitation gracefully
     }
     
     return null;

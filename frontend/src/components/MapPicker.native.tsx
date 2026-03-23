@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
+import type { GooglePlacesAutocompleteRef } from 'react-native-google-places-autocomplete';
 
 // Try to load react-native-maps; it requires a dev-client / standalone build.
 // In Expo Go the native module is missing, so we fall back to a simple UI.
@@ -81,6 +82,7 @@ const MapPickerNative: React.FC<MapPickerProps> = ({
   userLongitude,
 }) => {
   const mapRef = useRef<MapViewType | null>(null);
+  const placesRef = useRef<GooglePlacesAutocompleteRef | null>(null);
 
   const centreLat = latitude ?? userLatitude ?? 38.7223;
   const centreLng = longitude ?? userLongitude ?? -9.1393;
@@ -103,6 +105,9 @@ const MapPickerNative: React.FC<MapPickerProps> = ({
     if (details?.geometry?.location) {
       const { lat, lng } = details.geometry.location;
       onLocationSelect(lat, lng);
+
+      // Limpa o campo para permitir nova pesquisa
+      placesRef.current?.clear();
       
       // Anima o mapa para o novo local
       if (mapRef.current) {
@@ -130,6 +135,7 @@ const MapPickerNative: React.FC<MapPickerProps> = ({
   return (
     <View style={styles.container}>
       <GooglePlacesAutocomplete
+        ref={placesRef}
         placeholder="Pesquisar endereço..."
         onPress={handlePlaceSelect}
         query={{
@@ -138,6 +144,14 @@ const MapPickerNative: React.FC<MapPickerProps> = ({
         }}
         fetchDetails={true}
         enablePoweredByContainer={false}
+        debounce={300}
+        minLength={2}
+        keyboardShouldPersistTaps="handled"
+        textInputProps={{
+          autoCorrect: false,
+          autoCapitalize: 'none',
+          clearButtonMode: 'while-editing',
+        }}
         styles={{
           container: styles.searchContainer,
           textInput: styles.searchInput,

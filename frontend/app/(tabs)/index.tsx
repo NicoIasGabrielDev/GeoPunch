@@ -32,7 +32,7 @@ interface TodayStatusExtended extends Omit<TodayStatus, 'workplace'> {
 }
 
 export default function HomeScreen() {
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, isAuthenticated } = useAuth();
   const router = useRouter();
   const [todayStatus, setTodayStatus] = useState<TodayStatusExtended | null>(null);
   const [workplace, setWorkplace] = useState<Workplace | null>(null);
@@ -47,7 +47,12 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadData();
+      // Only load data if authenticated
+      if (isAuthenticated) {
+        loadData();
+      } else {
+        setLoading(false);
+      }
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
   );
@@ -91,7 +96,6 @@ export default function HomeScreen() {
       // Check if location services are available
       const servicesEnabled = await Location.hasServicesEnabledAsync();
       if (!servicesEnabled) {
-        console.log('Location services disabled');
         setLocationPermission(false);
         return;
       }
@@ -103,9 +107,8 @@ export default function HomeScreen() {
         try {
           const { status: backgroundStatus } = await Location.getBackgroundPermissionsAsync();
           setBackgroundPermission(backgroundStatus === 'granted');
-        } catch (bgError) {
+        } catch {
           // Background permissions might not be available in Expo Go
-          console.log('Background location check failed:', bgError);
           setBackgroundPermission(false);
         }
       } else {
@@ -118,7 +121,6 @@ export default function HomeScreen() {
     } catch (error: any) {
       // Handle Expo Go limitation - location permissions not available
       if (error?.message?.includes('NSLocation') || error?.message?.includes('Info.plist')) {
-        console.log('Location not available in Expo Go - use development build');
         setLocationPermission(false);
         setBackgroundPermission(false);
       } else {
@@ -138,7 +140,6 @@ export default function HomeScreen() {
     } catch (error: any) {
       // Handle Expo Go limitation
       if (error?.message?.includes('NSLocation') || error?.message?.includes('Info.plist')) {
-        console.log('Location permissions not available in Expo Go');
         Alert.alert(
           'Limitação do Expo Go',
           'As permissões de localização não estão disponíveis no Expo Go. Para funcionalidade completa, use um development build.',
@@ -162,14 +163,20 @@ export default function HomeScreen() {
   };
 
   const loadData = async () => {
+    // Don't load if not authenticated
+    if (!isAuthenticated) {
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       const [statusRes, workplaceRes] = await Promise.all([
         timesheetApi.getTodayStatus(),
         workplaceApi.getActive(),
       ]);
-      setTodayStatus(statusRes.data);
-      setWorkplace(statusRes.data.workplace || workplaceRes.data);
+      setTodayStatus(statusRes.data ?? null);
+      setWorkplace(statusRes.data?.workplace ?? workplaceRes.data ?? null);
       await updateLocation();
     } catch (error: any) {
       console.error('Error loading data:', error);

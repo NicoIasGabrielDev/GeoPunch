@@ -14,13 +14,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { workplaceApi, usersApi, seedData } from '../../src/services/api';
+import { workplaceApi, usersApi } from '../../src/services/api';
 import { Button } from '../../src/components/Button';
 import { Input } from '../../src/components/Input';
 import { Workplace, User } from '../../src/types';
 
 export default function AdminScreen() {
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const [workplaces, setWorkplaces] = useState<Workplace[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [, setLoading] = useState(true);
@@ -40,21 +40,11 @@ export default function AdminScreen() {
     allowedMarginMinutes: '120',
   });
 
-  useFocusEffect(
-    useCallback(() => {
-      loadData();
-    }, [])
-  );
+  const loadData = useCallback(async () => {
+    if (!isAuthenticated) return;
 
-  const loadData = async () => {
     try {
       setLoading(true);
-      // First seed data to ensure admin exists
-      try {
-        await seedData();
-      } catch {
-        // Ignore if already seeded
-      }
       
       const [workplacesRes, usersRes] = await Promise.all([
         workplaceApi.listAll(),
@@ -67,7 +57,15 @@ export default function AdminScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [isAuthenticated]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (isAuthenticated) {
+        loadData();
+      }
+    }, [isAuthenticated, loadData])
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);

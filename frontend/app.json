@@ -31,7 +31,7 @@
       "package": "com.geopunch.app",
       "config": {
         "googleMaps": {
-          "apiKey": "AIzaSyBx4HyqvondsGv83Q4Os_mgZ3Yy58YwC4Q"
+          "apiKey": "$EXPO_PUBLIC_GOOGLE_MAPS_API_KEY"
         }
       },
       "permissions": [

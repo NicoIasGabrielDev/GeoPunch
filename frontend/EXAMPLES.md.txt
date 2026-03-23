@@ -1,0 +1,418 @@
+/**
+ * EXAMPLES: How to Use New Architecture in Your Screens
+ * 
+ * This file provides practical examples of how to use the new
+ * Supabase Auth + Backend services in your React Native screens.
+ */
+
+import { useAuth } from '../contexts/AuthContext';
+import {
+  authService,
+  workplaceService,
+  punchService,
+  timesheetService,
+} from '../services/backend';
+
+// ============================================================================
+// EXAMPLE 1: Authentication in Login Screen
+// ============================================================================
+
+export function LoginScreenExample() {
+  const { login } = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  const handleLogin = async () => {
+    try {
+      // This uses Supabase Auth under the hood
+      await login(email, password);
+      
+      // User is now authenticated, AuthContext handles everything
+      // Navigate to main app
+      router.replace('/(tabs)');
+    } catch (error: any) {
+      Alert.alert('Error', error.message);
+    }
+  };
+
+  return (
+    <Button onPress={handleLogin} title="Login" />
+  );
+}
+
+// ============================================================================
+// EXAMPLE 2: Authentication in Register Screen
+// ============================================================================
+
+export function RegisterScreenExample() {
+  const { register } = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [employeeId, setEmployeeId] = useState('');
+
+  const handleRegister = async () => {
+    try {
+      // This uses Supabase Auth to create user
+      await register(email, password, name, employeeId);
+      
+      // User is now authenticated and profile created in backend
+      router.replace('/(tabs)');
+    } catch (error: any) {
+      if (error.message.includes('email')) {
+        Alert.alert('Error', 'Please confirm your email before logging in.');
+      } else {
+        Alert.alert('Error', error.message);
+      }
+    }
+  };
+
+  return (
+    <Button onPress={handleRegister} title="Register" />
+  );
+}
+
+// ============================================================================
+// EXAMPLE 3: Get Current User Profile
+// ============================================================================
+
+export function ProfileScreenExample() {
+  const { user, refreshUser } = useAuth();
+  const [loading, setLoading] = useState(false);
+
+  const handleRefreshProfile = async () => {
+    setLoading(true);
+    try {
+      // Fetches latest user data from backend
+      await refreshUser();
+      Alert.alert('Success', 'Profile updated!');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to refresh profile');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <View>
+      <Text>Name: {user?.name}</Text>
+      <Text>Email: {user?.email}</Text>
+      <Text>Role: {user?.role}</Text>
+      <Button onPress={handleRefreshProfile} title="Refresh" />
+    </View>
+  );
+}
+
+// ============================================================================
+// EXAMPLE 4: Create Workplace
+// ============================================================================
+
+export function CreateWorkplaceExample() {
+  const [name, setName] = useState('');
+  const [latitude, setLatitude] = useState(0);
+  const [longitude, setLongitude] = useState(0);
+
+  const handleCreateWorkplace = async () => {
+    try {
+      const workplace = await workplaceService.create({
+        name,
+        latitude,
+        longitude,
+        radiusMeters: 100,
+        workdays: {
+          monday: true,
+          tuesday: true,
+          wednesday: true,
+          thursday: true,
+          friday: true,
+          saturday: false,
+          sunday: false,
+        },
+        schedule: {
+          startTime: '09:00',
+          endTime: '18:00',
+          marginMinutes: 15,
+        },
+        locationLocked: true,
+      });
+
+      Alert.alert('Success', `Workplace "${workplace.name}" created!`);
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.message || error.message);
+    }
+  };
+
+  return (
+    <Button onPress={handleCreateWorkplace} title="Create Workplace" />
+  );
+}
+
+// ============================================================================
+// EXAMPLE 5: List Workplaces
+// ============================================================================
+
+export function WorkplacesListExample() {
+  const [workplaces, setWorkplaces] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadWorkplaces();
+  }, []);
+
+  const loadWorkplaces = async () => {
+    try {
+      const data = await workplaceService.list();
+      setWorkplaces(data);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to load workplaces');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSetActive = async (workplaceId: string) => {
+    try {
+      await workplaceService.setActive(workplaceId);
+      Alert.alert('Success', 'Workplace activated!');
+      await loadWorkplaces(); // Reload to see updated active status
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.message || error.message);
+    }
+  };
+
+  if (loading) return <ActivityIndicator />;
+
+  return (
+    <FlatList
+      data={workplaces}
+      renderItem={({ item }) => (
+        <View>
+          <Text>{item.name}</Text>
+          <Text>{item.isActive ? '✅ Active' : 'Inactive'}</Text>
+          <Button onPress={() => handleSetActive(item.id)} title="Set Active" />
+        </View>
+      )}
+    />
+  );
+}
+
+// ============================================================================
+// EXAMPLE 6: Clock In/Out
+// ============================================================================
+
+export function PunchExample() {
+  const [location, setLocation] = useState(null);
+
+  const getCurrentLocation = async () => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Error', 'Location permission denied');
+      return null;
+    }
+
+    const loc = await Location.getCurrentPositionAsync({});
+    setLocation(loc);
+    return loc;
+  };
+
+  const handleClockIn = async () => {
+    try {
+      const loc = await getCurrentLocation();
+      if (!loc) return;
+
+      await punchService.create({
+        punchType: 'IN',
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+        accuracy: loc.coords.accuracy,
+        note: 'Clocked in',
+        method: 'MANUAL',
+      });
+
+      Alert.alert('Success', 'Clocked in successfully!');
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.message || error.message);
+    }
+  };
+
+  const handleClockOut = async () => {
+    try {
+      const loc = await getCurrentLocation();
+      if (!loc) return;
+
+      await punchService.create({
+        punchType: 'OUT',
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+        accuracy: loc.coords.accuracy,
+        note: 'Clocked out',
+        method: 'MANUAL',
+      });
+
+      Alert.alert('Success', 'Clocked out successfully!');
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.message || error.message);
+    }
+  };
+
+  return (
+    <View>
+      <Button onPress={handleClockIn} title="Clock In" />
+      <Button onPress={handleClockOut} title="Clock Out" />
+    </View>
+  );
+}
+
+// ============================================================================
+// EXAMPLE 7: Today's Status
+// ============================================================================
+
+export function TodayStatusExample() {
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadTodayStatus();
+  }, []);
+
+  const loadTodayStatus = async () => {
+    try {
+      const data = await timesheetService.getTodayStatus();
+      setStatus(data);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to load today status');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) return <ActivityIndicator />;
+  if (!status) return <Text>No data</Text>;
+
+  return (
+    <View>
+      <Text>Date: {status.date}</Text>
+      <Text>Current State: {status.currentState}</Text>
+      {status.lastPunch && (
+        <>
+          <Text>Last Punch: {status.lastPunch.punchType}</Text>
+          <Text>Time: {status.lastPunch.timestamp}</Text>
+        </>
+      )}
+      {status.todaySummary && (
+        <>
+          <Text>Hours Worked: {status.todaySummary.totalHours}h</Text>
+          <Text>Regular: {status.todaySummary.regularHours}h</Text>
+          <Text>Overtime: {status.todaySummary.overtimeHours}h</Text>
+        </>
+      )}
+    </View>
+  );
+}
+
+// ============================================================================
+// EXAMPLE 8: Timesheet History
+// ============================================================================
+
+export function TimesheetExample() {
+  const [timesheet, setTimesheet] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadTimesheet();
+  }, []);
+
+  const loadTimesheet = async () => {
+    try {
+      // Get last 30 days
+      const toDate = new Date().toISOString().split('T')[0];
+      const fromDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split('T')[0];
+
+      const data = await timesheetService.getTimesheet(fromDate, toDate);
+      setTimesheet(data);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to load timesheet');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) return <ActivityIndicator />;
+  if (!timesheet) return <Text>No data</Text>;
+
+  return (
+    <FlatList
+      data={timesheet.days}
+      renderItem={({ item }) => (
+        <View>
+          <Text>{item.date}</Text>
+          <Text>Hours: {item.totalHours}h</Text>
+          <Text>Status: {item.status}</Text>
+        </View>
+      )}
+    />
+  );
+}
+
+// ============================================================================
+// EXAMPLE 9: Error Handling Pattern
+// ============================================================================
+
+export function ErrorHandlingExample() {
+  const handleApiCall = async () => {
+    try {
+      const data = await workplaceService.list();
+      // Success
+      Alert.alert('Success', 'Data loaded');
+    } catch (error: any) {
+      // Handle different error types
+      if (error.response) {
+        // Backend returned error response
+        const message = error.response.data?.message || error.response.data?.detail;
+        Alert.alert('Error', message || 'Server error');
+      } else if (error.message?.includes('Network')) {
+        // Network error
+        Alert.alert('Error', 'No internet connection');
+      } else {
+        // Other errors
+        Alert.alert('Error', error.message || 'Something went wrong');
+      }
+    }
+  };
+}
+
+// ============================================================================
+// EXAMPLE 10: Loading States Pattern
+// ============================================================================
+
+export function LoadingStateExample() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const result = await workplaceService.list();
+      setData(result);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) return <ActivityIndicator size="large" />;
+  if (error) return <Text>Error: {error}</Text>;
+  if (!data) return <Text>No data</Text>;
+
+  return <Text>Data loaded: {JSON.stringify(data)}</Text>;
+}

@@ -1,23 +1,27 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { getAccessToken, getStoredAccessToken } from '../config/supabase';
 
 // Use environment variable - required for deployment
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
-if (!API_URL) {
-  console.warn('EXPO_PUBLIC_BACKEND_URL not set - API calls may fail');
-}
+// Remove trailing slash if present to avoid double slashes
+const baseUrl = API_URL ? API_URL.replace(/\/$/, '') : '';
 
 const api = axios.create({
-  baseURL: `${API_URL || ''}/api`,
+  baseURL: `${baseUrl}/api`,
   headers: {
     'Content-Type': 'application/json',
   },
   timeout: 30000,
 });
 
-// Token storage functions
+// ============================================================================
+// DEPRECATED: Old token management functions
+// These are kept for backward compatibility but should not be used
+// Use Supabase Auth via AuthContext instead
+// ============================================================================
 export const getToken = async (): Promise<string | null> => {
   try {
     if (Platform.OS === 'web') {
@@ -78,52 +82,41 @@ export const removeToken = async (): Promise<void> => {
   }
 };
 
-// Request interceptor
+// Request interceptor - now uses Supabase token
 api.interceptors.request.use(
   async (config) => {
-    const token = await getToken();
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    try {
+      // Get Supabase token instead of old auth_token
+      const token = (await getAccessToken()) || (await getStoredAccessToken());
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    } catch (error) {
+      console.error('Error getting access token:', error);
     }
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-// Response interceptor for token refresh
+// Response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    const originalRequest = error.config;
-    
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true;
-      
-      try {
-        const refreshToken = await getRefreshToken();
-        if (refreshToken) {
-          const response = await axios.post(`${API_URL}/api/auth/refresh`, {
-            refresh_token: refreshToken
-          });
-          
-          const { access_token, refresh_token: newRefreshToken } = response.data;
-          await setToken(access_token);
-          await setRefreshToken(newRefreshToken);
-          
-          originalRequest.headers.Authorization = `Bearer ${access_token}`;
-          return api(originalRequest);
-        }
-      } catch (refreshError) {
-        await removeToken();
-        return Promise.reject(refreshError);
-      }
+  (error) => {
+    // Treat 404 as empty data (new user with no records yet)
+    if (error.response?.status === 404) {
+      return Promise.resolve({ data: null, status: 404 });
     }
-    
+
     return Promise.reject(error);
   }
 );
 
+// ============================================================================
 // Auth endpoints
+// DEPRECATED: Use AuthContext with Supabase Auth instead
+// These are kept for backward compatibility only
+// ============================================================================
 export const authApi = {
   register: (data: { email: string; password: string; name: string; employeeId?: string }) =>
     api.post('/auth/register', data),

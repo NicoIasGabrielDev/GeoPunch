@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { workplaceApi, seedData } from '../../src/services/api';
+import { workplaceApi } from '../../src/services/api';
 import { Button } from '../../src/components/Button';
 import { Input } from '../../src/components/Input';
 import { MapPicker } from '../../src/components/MapPicker';
@@ -42,6 +42,7 @@ export default function WorkplacesScreen() {
   const [workplaces, setWorkplaces] = useState<Workplace[]>([]);
   const [, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [wizardVisible, setWizardVisible] = useState(false);
   const [wizardStep, setWizardStep] = useState(1);
   const [editingWorkplace, setEditingWorkplace] = useState<Workplace | null>(null);
@@ -94,13 +95,8 @@ export default function WorkplacesScreen() {
   const loadWorkplaces = async () => {
     try {
       setLoading(true);
-      // Seed data first
-      try {
-        await seedData();
-      } catch {}
-      
       const response = await workplaceApi.list();
-      setWorkplaces(response.data);
+      setWorkplaces(response.data ?? []);
     } catch (error) {
       console.error('Error loading workplaces:', error);
     } finally {
@@ -169,25 +165,19 @@ export default function WorkplacesScreen() {
   };
 
   const handleCreateWorkplace = async () => {
-    console.log('handleCreateWorkplace called', wizardData);
-    
     if (!wizardData.name.trim()) {
-      console.log('Name is empty');
       Alert.alert('Erro', 'Nome é obrigatório');
       return;
     }
     
     if (!wizardData.latitude || !wizardData.longitude) {
-      console.log('Location is null', { lat: wizardData.latitude, lng: wizardData.longitude });
       Alert.alert('Erro', 'Selecione a localização no mapa');
       return;
     }
     
-    console.log('Creating workplace with data:', wizardData);
-    
+    setSaving(true);
     try {
       if (editingWorkplace) {
-        // Update only non-location fields
         await workplaceApi.update(editingWorkplace.id, {
           name: wizardData.name,
           radiusMeters: wizardData.radiusMeters,
@@ -210,7 +200,16 @@ export default function WorkplacesScreen() {
       setWizardVisible(false);
       await loadWorkplaces();
     } catch (error: any) {
-      Alert.alert('Erro', error.response?.data?.detail || 'Erro ao guardar');
+      console.error('Error saving workplace:', error);
+      const detail = error.response?.data?.detail;
+      const msg =
+        (Array.isArray(detail) ? detail.map((d: any) => d.msg).join(', ') : detail) ||
+        error.response?.data?.message ||
+        error.message ||
+        'Erro ao guardar. Verifique a ligação e tente novamente.';
+      Alert.alert('Erro', msg);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -437,6 +436,7 @@ export default function WorkplacesScreen() {
             <Button
               title={editingWorkplace ? "Guardar Alterações" : "Criar Local de Trabalho"}
               onPress={handleCreateWorkplace}
+              loading={saving}
               style={{ marginTop: 20 }}
             />
           </View>
@@ -584,9 +584,15 @@ export default function WorkplacesScreen() {
             </View>
           )}
           
-          <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-            {renderWizardStep()}
-          </ScrollView>
+          {wizardStep === 2 ? (
+            <View style={{ flex: 1 }}>
+              {renderWizardStep()}
+            </View>
+          ) : (
+            <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+              {renderWizardStep()}
+            </ScrollView>
+          )}
           
           {wizardStep > 1 && !editingWorkplace && (
             <TouchableOpacity
