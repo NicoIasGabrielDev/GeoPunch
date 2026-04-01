@@ -1,5 +1,4 @@
 import * as Location from 'expo-location';
-import { Platform } from 'react-native';
 
 export const calculateDistance = (
   lat1: number,
@@ -21,22 +20,9 @@ const toRad = (value: number): number => (value * Math.PI) / 180;
 
 export const requestLocationPermissions = async (): Promise<boolean> => {
   try {
-    // Request foreground permission first
     const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
     if (foregroundStatus !== 'granted') {
       return false;
-    }
-
-    // For mobile, also request background permission
-    if (Platform.OS !== 'web') {
-      try {
-        const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
-        if (backgroundStatus !== 'granted') {
-            // Still return true - app can work without background location
-          }
-      } catch {
-        // Background permission might not be available in Expo Go
-      }
     }
 
     return true;

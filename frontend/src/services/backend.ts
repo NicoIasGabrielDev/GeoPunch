@@ -5,8 +5,12 @@ import { ScheduleConfig, WorkdaysConfig } from '../types';
 // Get backend URL from environment
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
+if (!BACKEND_URL) {
+  throw new Error('Missing EXPO_PUBLIC_BACKEND_URL. Configure it before creating a production build.');
+}
+
 // Remove trailing slash if present to avoid double slashes
-const baseUrl = BACKEND_URL ? BACKEND_URL.replace(/\/$/, '') : '';
+const baseUrl = BACKEND_URL.replace(/\/$/, '');
 
 // Create axios instance for backend API
 const backendApi: AxiosInstance = axios.create({

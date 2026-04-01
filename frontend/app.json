@@ -33,14 +33,7 @@
         "googleMaps": {
           "apiKey": "$EXPO_PUBLIC_GOOGLE_MAPS_API_KEY"
         }
-      },
-      "permissions": [
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION",
-        "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_LOCATION"
-      ]
+      }
     },
     "web": {
       "bundler": "metro",
@@ -56,8 +49,8 @@
           "locationAlwaysAndWhenInUsePermission": "GeoPunch precisa de acesso contínuo à localização para notificações automáticas de entrada e saída do trabalho.",
           "locationAlwaysPermission": "GeoPunch precisa de acesso contínuo à localização para notificações automáticas de entrada e saída do trabalho.",
           "locationWhenInUsePermission": "GeoPunch precisa da sua localização para verificar presença no local de trabalho e registar ponto.",
-          "isAndroidBackgroundLocationEnabled": true,
-          "isAndroidForegroundServiceEnabled": true
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": false
         }
       ],
       [

@@ -6,7 +6,6 @@ import {
   ScrollView,
   RefreshControl,
   Alert,
-  Platform,
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
@@ -43,7 +42,6 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [locationPermission, setLocationPermission] = useState<boolean>(false);
-  const [backgroundPermission, setBackgroundPermission] = useState<boolean>(false);
   const [isWorkday, setIsWorkday] = useState<boolean>(true);
 
   useFocusEffect(
@@ -103,19 +101,7 @@ export default function HomeScreen() {
 
       const { status: foregroundStatus } = await Location.getForegroundPermissionsAsync();
       setLocationPermission(foregroundStatus === 'granted');
-      
-      if (Platform.OS !== 'web') {
-        try {
-          const { status: backgroundStatus } = await Location.getBackgroundPermissionsAsync();
-          setBackgroundPermission(backgroundStatus === 'granted');
-        } catch {
-          // Background permissions might not be available in Expo Go
-          setBackgroundPermission(false);
-        }
-      } else {
-        setBackgroundPermission(true); // Not applicable on web
-      }
-      
+
       if (foregroundStatus === 'granted') {
         updateLocation();
       }
@@ -123,7 +109,6 @@ export default function HomeScreen() {
       // Handle Expo Go limitation - location permissions not available
       if (error?.message?.includes('NSLocation') || error?.message?.includes('Info.plist')) {
         setLocationPermission(false);
-        setBackgroundPermission(false);
       } else {
         console.error('Error checking permissions:', error);
       }
@@ -275,7 +260,7 @@ export default function HomeScreen() {
   };
 
   const renderPermissionDiagnostics = () => {
-    if (locationPermission && backgroundPermission) return null;
+    if (locationPermission) return null;
     
     return (
       <View style={styles.diagnosticsCard}>
@@ -295,19 +280,6 @@ export default function HomeScreen() {
           </Text>
         </View>
         
-        {Platform.OS !== 'web' && (
-          <View style={styles.permissionRow}>
-            <Ionicons 
-              name={backgroundPermission ? "checkmark-circle" : "close-circle"} 
-              size={20} 
-              color={backgroundPermission ? "#28a745" : "#ffc107"} 
-            />
-            <Text style={styles.permissionText}>
-              Localização em segundo plano: {backgroundPermission ? "Ativa" : "Limitada"}
-            </Text>
-          </View>
-        )}
-        
         {!locationPermission && (
           <Button
             title="Ativar Localização"
@@ -316,12 +288,10 @@ export default function HomeScreen() {
             style={{ marginTop: 12 }}
           />
         )}
-        
-        {!backgroundPermission && Platform.OS !== 'web' && (
-          <Text style={styles.permissionHint}>
-            Nota: Sem permissão de segundo plano, as notificações de geofence podem não funcionar quando a app está fechada.
-          </Text>
-        )}
+
+        <Text style={styles.permissionHint}>
+          Esta versão Android usa localização apenas enquanto a app está em uso.
+        </Text>
       </View>
     );
   };

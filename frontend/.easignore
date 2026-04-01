@@ -1,0 +1,21 @@
+# Dependencies and local caches
+node_modules/
+.expo/
+.metro-cache/
+
+# Android native build outputs and local tooling state
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/app/.cxx/
+
+# Editor/local machine files
+.idea/
+.vscode/
+*.log
+*.hprof
+
+# Local-only env files
+.env
+.env*.local

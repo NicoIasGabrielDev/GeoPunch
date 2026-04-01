@@ -130,7 +130,10 @@ const MapPickerNative: React.FC<MapPickerProps> = ({
   const MK = Marker!;
   const CR = Circle!;
 
-  const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
+  const GOOGLE_PLACES_API_KEY =
+    process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY ||
+    process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
+    '';
 
   return (
     <View style={styles.container}>
@@ -139,7 +142,7 @@ const MapPickerNative: React.FC<MapPickerProps> = ({
         placeholder="Pesquisar endereço..."
         onPress={handlePlaceSelect}
         query={{
-          key: GOOGLE_MAPS_API_KEY,
+          key: GOOGLE_PLACES_API_KEY,
           language: 'pt-PT',
         }}
         fetchDetails={true}
