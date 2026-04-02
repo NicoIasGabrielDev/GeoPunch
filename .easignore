@@ -1,0 +1,29 @@
+# Monorepo directories not needed for the mobile build
+backend/
+memory/
+test_reports/
+tests/
+
+# Root-level local files
+*.log
+*.tmp
+
+# Expo app dependencies and caches must be installed/generated on the builder
+frontend/node_modules/
+frontend/.expo/
+frontend/.metro-cache/
+
+# Android local build outputs and machine-specific state
+frontend/android/.gradle/
+frontend/android/.kotlin/
+frontend/android/build/
+frontend/android/app/build/
+frontend/android/app/.cxx/
+frontend/node_modules/**/android/build/
+frontend/node_modules/**/.cxx/
+
+# Editor and local env files
+frontend/.idea/
+frontend/.vscode/
+frontend/.env
+frontend/.env*.local
