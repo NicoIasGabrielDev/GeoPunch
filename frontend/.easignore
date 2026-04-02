@@ -9,6 +9,8 @@ android/.kotlin/
 android/build/
 android/app/build/
 android/app/.cxx/
+**/android/build/
+**/.cxx/
 
 # Editor/local machine files
 .idea/
