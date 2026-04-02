@@ -1,8 +1,7 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../src/contexts/AuthContext';
-import { Ionicons } from '@expo/vector-icons';
 
 export default function Index() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -21,9 +20,11 @@ export default function Index() {
   return (
     <View style={styles.container}>
       <View style={styles.logoContainer}>
-        <View style={styles.iconCircle}>
-          <Ionicons name="location" size={48} color="#fff" />
-        </View>
+        <Image
+          source={require('../assets/images/icon.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
         <Text style={styles.title}>GeoPunch</Text>
         <Text style={styles.subtitle}>Controlo de Ponto Inteligente</Text>
       </View>
@@ -35,7 +36,7 @@ export default function Index() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#dbeafb',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -43,13 +44,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 40,
   },
-  iconCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#1a73e8',
-    justifyContent: 'center',
-    alignItems: 'center',
+  logo: {
+    width: 120,
+    height: 120,
     marginBottom: 16,
   },
   title: {
