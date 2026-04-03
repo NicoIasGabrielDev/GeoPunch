@@ -88,9 +88,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.geopunch.app'
+    namespace 'com.geopunch.mobile'
     defaultConfig {
-        applicationId 'com.geopunch.app'
+        applicationId 'com.geopunch.mobile'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

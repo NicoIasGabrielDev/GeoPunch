@@ -1,4 +1,4 @@
-package com.geopunch.app
+package com.geopunch.mobile
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

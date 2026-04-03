@@ -28,7 +28,7 @@
         "backgroundColor": "#dbeafb"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.geopunch.app",
+      "package": "com.geopunch.mobile",
       "config": {
         "googleMaps": {
           "apiKey": "$EXPO_PUBLIC_GOOGLE_MAPS_API_KEY"
