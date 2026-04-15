@@ -6,7 +6,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 export default function TabsLayout() {
   const { user, isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
-  const isAdmin = user?.role === 'admin';
+  const isEnterpriseOwner = user?.role === 'enterprise_owner';
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -50,6 +50,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="calendar" size={size} color={color} />
           ),
+          href: isEnterpriseOwner ? null : '/(tabs)/history',
         }}
       />
       <Tabs.Screen
@@ -68,16 +69,17 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="download" size={size} color={color} />
           ),
+          href: isEnterpriseOwner ? null : '/(tabs)/export',
         }}
       />
       <Tabs.Screen
         name="admin"
         options={{
-          title: 'Admin',
+          title: 'Empresa',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="settings" size={size} color={color} />
           ),
-          href: isAdmin ? '/(tabs)/admin' : null,
+          href: isEnterpriseOwner ? '/(tabs)/admin' : null,
         }}
       />
       <Tabs.Screen

@@ -90,6 +90,26 @@ Isso abrirá o Expo DevTools. Você pode:
 - Pressionar `w` para abrir no navegador
 - Escanear o QR code com Expo Go
 
+### Modo Seed para Screenshots
+
+Para gerar capturas da Play Store com dados bonitos e consistentes, ative o modo seed:
+
+```env
+EXPO_PUBLIC_SCREENSHOT_SEED=true
+```
+
+Quando esta flag estiver ativa, a app:
+- entra diretamente com um utilizador demo
+- mostra histórico, locais, perfil e admin com dados mockados
+- evita depender do backend/Supabase para abrir as telas
+- usa uma localização demo para o dashboard ficar pronto para screenshot
+
+Depois de alterar a flag, reinicie o bundler com cache limpo:
+
+```bash
+npx expo start --clear
+```
+
 ---
 
 ## 📁 Estrutura do Projeto

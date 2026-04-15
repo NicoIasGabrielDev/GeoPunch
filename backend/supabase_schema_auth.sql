@@ -1,32 +1,106 @@
--- GeoPunch Database Schema for Supabase with Supabase Auth
--- Run this SQL in your Supabase SQL Editor
--- This schema uses Supabase Auth (auth.users) instead of custom authentication
+-- GeoPunch enterprise-aware schema for Supabase Auth
+-- Supports:
+-- - personal accounts
+-- - enterprise owner accounts
+-- - enterprise invitations / memberships
+-- - enterprise workplaces and employee assignments
 
--- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- ==================== PROFILES TABLE ====================
--- This table stores application-specific user data
--- It has a 1:1 relationship with auth.users using the same id
+-- ==================== ENTERPRISES ====================
+
+CREATE TABLE IF NOT EXISTS enterprises (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    owner_user_id UUID UNIQUE NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    nif VARCHAR(50),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_enterprises_owner_user_id ON enterprises(owner_user_id);
+
+-- ==================== PROFILES ====================
+
 CREATE TABLE IF NOT EXISTS profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     email VARCHAR(255) UNIQUE NOT NULL,
     name VARCHAR(255) NOT NULL,
     employee_id VARCHAR(100),
-    role VARCHAR(50) DEFAULT 'employee',
+    role VARCHAR(50) DEFAULT 'personal_user',
+    account_type VARCHAR(50) DEFAULT 'personal',
+    enterprise_id UUID REFERENCES enterprises(id) ON DELETE SET NULL,
     active_workplace_id UUID,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     last_login TIMESTAMP WITH TIME ZONE
 );
 
--- Index for email lookups
-CREATE INDEX IF NOT EXISTS idx_profiles_email ON profiles(email);
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS employee_id VARCHAR(100);
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'personal_user';
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS account_type VARCHAR(50) DEFAULT 'personal';
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id) ON DELETE SET NULL;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS active_workplace_id UUID;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_login TIMESTAMP WITH TIME ZONE;
 
--- ==================== WORKPLACES TABLE ====================
+CREATE INDEX IF NOT EXISTS idx_profiles_email ON profiles(email);
+CREATE INDEX IF NOT EXISTS idx_profiles_enterprise_id ON profiles(enterprise_id);
+
+-- ==================== MEMBERSHIPS ====================
+
+CREATE TABLE IF NOT EXISTS enterprise_memberships (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    enterprise_id UUID NOT NULL REFERENCES enterprises(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    email VARCHAR(255) NOT NULL,
+    invited_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    status VARCHAR(50) NOT NULL DEFAULT 'pending',
+    accepted_at TIMESTAMP WITH TIME ZONE,
+    responded_at TIMESTAMP WITH TIME ZONE,
+    removed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_enterprise_memberships_enterprise_id ON enterprise_memberships(enterprise_id);
+CREATE INDEX IF NOT EXISTS idx_enterprise_memberships_email ON enterprise_memberships(email);
+CREATE INDEX IF NOT EXISTS idx_enterprise_memberships_user_id ON enterprise_memberships(user_id);
+CREATE INDEX IF NOT EXISTS idx_enterprise_memberships_status ON enterprise_memberships(status);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'enterprise_memberships_status_check'
+    ) THEN
+        ALTER TABLE enterprise_memberships
+        ADD CONSTRAINT enterprise_memberships_status_check
+        CHECK (status IN ('pending', 'accepted', 'rejected', 'removed'));
+    END IF;
+END $$;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'enterprise_memberships_unique_enterprise_email'
+    ) THEN
+        ALTER TABLE enterprise_memberships
+        ADD CONSTRAINT enterprise_memberships_unique_enterprise_email
+        UNIQUE (enterprise_id, email);
+    END IF;
+END $$;
+
+-- ==================== WORKPLACES ====================
+
 CREATE TABLE IF NOT EXISTS workplaces (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    enterprise_id UUID REFERENCES enterprises(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     latitude DECIMAL(10, 8) NOT NULL,
     longitude DECIMAL(11, 8) NOT NULL,
@@ -41,11 +115,42 @@ CREATE TABLE IF NOT EXISTS workplaces (
     CONSTRAINT valid_radius CHECK (radius_meters >= 50 AND radius_meters <= 300)
 );
 
--- Indexes for workplace queries
+ALTER TABLE workplaces ALTER COLUMN user_id DROP NOT NULL;
+ALTER TABLE workplaces ADD COLUMN IF NOT EXISTS enterprise_id UUID REFERENCES enterprises(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS idx_workplaces_user_id ON workplaces(user_id);
+CREATE INDEX IF NOT EXISTS idx_workplaces_enterprise_id ON workplaces(enterprise_id);
 CREATE INDEX IF NOT EXISTS idx_workplaces_is_active ON workplaces(is_active);
 
--- ==================== PUNCHES TABLE ====================
+-- ==================== EMPLOYEE WORKPLACE ASSIGNMENTS ====================
+
+CREATE TABLE IF NOT EXISTS employee_workplaces (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    enterprise_id UUID NOT NULL REFERENCES enterprises(id) ON DELETE CASCADE,
+    employee_user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    workplace_id UUID NOT NULL REFERENCES workplaces(id) ON DELETE CASCADE,
+    assigned_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_employee_workplaces_enterprise_id ON employee_workplaces(enterprise_id);
+CREATE INDEX IF NOT EXISTS idx_employee_workplaces_employee_user_id ON employee_workplaces(employee_user_id);
+CREATE INDEX IF NOT EXISTS idx_employee_workplaces_workplace_id ON employee_workplaces(workplace_id);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'employee_workplaces_unique_assignment'
+    ) THEN
+        ALTER TABLE employee_workplaces
+        ADD CONSTRAINT employee_workplaces_unique_assignment
+        UNIQUE (employee_user_id, workplace_id);
+    END IF;
+END $$;
+
+-- ==================== PUNCHES ====================
+
 CREATE TABLE IF NOT EXISTS punches (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -65,14 +170,14 @@ CREATE TABLE IF NOT EXISTS punches (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Indexes for punch queries
 CREATE INDEX IF NOT EXISTS idx_punches_user_id ON punches(user_id);
 CREATE INDEX IF NOT EXISTS idx_punches_workplace_id ON punches(workplace_id);
 CREATE INDEX IF NOT EXISTS idx_punches_date ON punches(date);
 CREATE INDEX IF NOT EXISTS idx_punches_user_date ON punches(user_id, date);
 CREATE INDEX IF NOT EXISTS idx_punches_user_workplace_date ON punches(user_id, workplace_id, date);
 
--- ==================== GEOFENCE EVENTS TABLE ====================
+-- ==================== GEOFENCE EVENTS ====================
+
 CREATE TABLE IF NOT EXISTS geofence_events (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     event_id VARCHAR(255) NOT NULL,
@@ -88,15 +193,13 @@ CREATE TABLE IF NOT EXISTS geofence_events (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Indexes for geofence event queries
 CREATE INDEX IF NOT EXISTS idx_geofence_events_user_id ON geofence_events(user_id);
 CREATE INDEX IF NOT EXISTS idx_geofence_events_workplace_id ON geofence_events(workplace_id);
 CREATE INDEX IF NOT EXISTS idx_geofence_events_event_id ON geofence_events(event_id);
 CREATE INDEX IF NOT EXISTS idx_geofence_events_processed ON geofence_events(processed);
 
--- ==================== FUNCTIONS ====================
+-- ==================== FUNCTIONS / TRIGGERS ====================
 
--- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -105,92 +208,91 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Triggers to auto-update updated_at
+DROP TRIGGER IF EXISTS update_profiles_updated_at ON profiles;
 CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON profiles
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_workplaces_updated_at ON workplaces;
 CREATE TRIGGER update_workplaces_updated_at BEFORE UPDATE ON workplaces
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Function to automatically create profile on user signup
+DROP TRIGGER IF EXISTS update_enterprises_updated_at ON enterprises;
+CREATE TRIGGER update_enterprises_updated_at BEFORE UPDATE ON enterprises
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_enterprise_memberships_updated_at ON enterprise_memberships;
+CREATE TRIGGER update_enterprise_memberships_updated_at BEFORE UPDATE ON enterprise_memberships
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+    user_account_type TEXT;
 BEGIN
-    INSERT INTO public.profiles (id, email, name, role)
+    user_account_type := COALESCE(NEW.raw_user_meta_data->>'account_type', 'personal');
+
+    INSERT INTO public.profiles (id, email, name, employee_id, role, account_type)
     VALUES (
         NEW.id,
         NEW.email,
         COALESCE(NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
-        'employee'
+        NEW.raw_user_meta_data->>'employee_id',
+        CASE
+            WHEN user_account_type = 'enterprise' THEN 'enterprise_owner'
+            ELSE 'personal_user'
+        END,
+        user_account_type
     );
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Trigger to create profile automatically when a user signs up
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
--- ==================== ROW LEVEL SECURITY (RLS) ====================
--- Enable RLS on all tables
+-- ==================== RLS ====================
+
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE enterprises ENABLE ROW LEVEL SECURITY;
+ALTER TABLE enterprise_memberships ENABLE ROW LEVEL SECURITY;
 ALTER TABLE workplaces ENABLE ROW LEVEL SECURITY;
+ALTER TABLE employee_workplaces ENABLE ROW LEVEL SECURITY;
 ALTER TABLE punches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE geofence_events ENABLE ROW LEVEL SECURITY;
 
--- RLS Policies for profiles table
+DROP POLICY IF EXISTS "Users can view their own profile" ON profiles;
+DROP POLICY IF EXISTS "Users can update their own profile" ON profiles;
+DROP POLICY IF EXISTS "Users can insert their own profile" ON profiles;
+
 CREATE POLICY "Users can view their own profile" ON profiles
     FOR SELECT USING (auth.uid() = id);
 
 CREATE POLICY "Users can update their own profile" ON profiles
-    FOR UPDATE USING (auth.uid() = id);
+    FOR UPDATE USING (auth.uid() = id)
+    WITH CHECK (auth.uid() = id);
 
--- RLS Policies for workplaces table
-CREATE POLICY "Users can view their own workplaces" ON workplaces
-    FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert their own profile" ON profiles
+    FOR INSERT WITH CHECK (auth.uid() = id);
 
-CREATE POLICY "Users can insert their own workplaces" ON workplaces
-    FOR INSERT WITH CHECK (auth.uid() = user_id);
+-- ==================== EXISTING USER MIGRATION ====================
 
-CREATE POLICY "Users can update their own workplaces" ON workplaces
-    FOR UPDATE USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete their own workplaces" ON workplaces
-    FOR DELETE USING (auth.uid() = user_id);
-
--- RLS Policies for punches table
-CREATE POLICY "Users can view their own punches" ON punches
-    FOR SELECT USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert their own punches" ON punches
-    FOR INSERT WITH CHECK (auth.uid() = user_id);
-
--- RLS Policies for geofence_events table
-CREATE POLICY "Users can view their own geofence events" ON geofence_events
-    FOR SELECT USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert their own geofence events" ON geofence_events
-    FOR INSERT WITH CHECK (auth.uid() = user_id);
-
--- ==================== MIGRATION NOTES ====================
--- If you have existing data in a 'users' table:
--- 1. Users need to re-register through Supabase Auth
--- 2. Or write a migration script to:
---    - Create auth.users entries (requires admin privileges)
---    - Migrate user data to profiles table
---
--- For fresh installation, no migration needed.
-
--- ==================== SETUP NOTES ====================
--- After running this script:
--- 1. Copy your SUPABASE_URL from Project Settings > API
--- 2. Copy your SUPABASE_KEY (anon/public key) from Project Settings > API  
--- 3. Add them to your .env file:
---    SUPABASE_URL=https://your-project.supabase.co
---    SUPABASE_KEY=your-anon-key
--- 4. Configure Supabase Auth in Dashboard:
---    - Enable Email provider
---    - Configure Email templates
---    - Set Site URL and Redirect URLs
+INSERT INTO public.profiles (id, email, name, employee_id, role, account_type, created_at, updated_at)
+SELECT
+    au.id,
+    au.email,
+    COALESCE(au.raw_user_meta_data->>'name', split_part(au.email, '@', 1)),
+    au.raw_user_meta_data->>'employee_id',
+    CASE
+        WHEN COALESCE(au.raw_user_meta_data->>'account_type', 'personal') = 'enterprise' THEN 'enterprise_owner'
+        WHEN COALESCE(au.raw_user_meta_data->>'role', '') = 'admin' THEN 'enterprise_owner'
+        ELSE 'personal_user'
+    END,
+    COALESCE(au.raw_user_meta_data->>'account_type', 'personal'),
+    au.created_at,
+    NOW()
+FROM auth.users au
+WHERE NOT EXISTS (
+    SELECT 1 FROM public.profiles p WHERE p.id = au.id
+);

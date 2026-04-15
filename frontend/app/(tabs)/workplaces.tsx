@@ -13,11 +13,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { workplaceService } from '../../src/services/backend';
+import { isScreenshotSeedEnabled } from '../../src/config/appMode';
+import { useAuth } from '../../src/contexts/AuthContext';
+import { screenshotSeedService } from '../../src/demo/screenshotSeed';
+import { ensureBackendReady, workplaceService } from '../../src/services/backend';
 import { Button } from '../../src/components/Button';
 import { Input } from '../../src/components/Input';
 import { MapPicker } from '../../src/components/MapPicker';
 import { Workplace, WorkdaysConfig } from '../../src/types';
+import { getHumanReadableError } from '../../src/utils/network';
 
 interface WizardData {
   name: string;
@@ -39,6 +43,7 @@ const WORKDAY_PRESETS = {
 };
 
 export default function WorkplacesScreen() {
+  const { user } = useAuth();
   const [workplaces, setWorkplaces] = useState<Workplace[]>([]);
   const [, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -56,6 +61,8 @@ export default function WorkplacesScreen() {
     workdays: WORKDAY_PRESETS.weekdays,
     schedule: null,
   });
+  const isEnterpriseOwner = user?.role === 'enterprise_owner';
+  const isEmployee = user?.role === 'employee';
 
   useFocusEffect(
     useCallback(() => {
@@ -65,6 +72,15 @@ export default function WorkplacesScreen() {
   );
 
   const getUserLocation = async () => {
+    if (isScreenshotSeedEnabled) {
+      const demoLocation = screenshotSeedService.getCurrentLocation();
+      setUserLocation({
+        latitude: demoLocation.latitude,
+        longitude: demoLocation.longitude,
+      });
+      return;
+    }
+
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
@@ -95,6 +111,7 @@ export default function WorkplacesScreen() {
   const loadWorkplaces = async () => {
     try {
       setLoading(true);
+      await ensureBackendReady();
       const data = await workplaceService.list();
       setWorkplaces(data ?? []);
     } catch (error) {
@@ -111,6 +128,7 @@ export default function WorkplacesScreen() {
   };
 
   const openWizard = () => {
+    if (isEmployee) return;
     setWizardData({
       name: '',
       latitude: userLocation?.latitude || null,
@@ -130,11 +148,18 @@ export default function WorkplacesScreen() {
       Alert.alert('Sucesso', `'${workplace.name}' definido como local ativo`);
       await loadWorkplaces();
     } catch (error: any) {
-      Alert.alert('Erro', error.response?.data?.detail || 'Erro ao definir local ativo');
+      Alert.alert(
+        'Erro',
+        getHumanReadableError(error, {
+          defaultMessage: 'Erro ao definir local ativo',
+          service: 'backend',
+        }),
+      );
     }
   };
 
   const handleEditWorkplace = (workplace: Workplace) => {
+    if (isEmployee) return;
     setEditingWorkplace(workplace);
     setWizardData({
       name: workplace.name,
@@ -203,12 +228,10 @@ export default function WorkplacesScreen() {
       
       setWizardVisible(false);
     } catch (error: any) {
-      const detail = error.response?.data?.detail;
-      const msg =
-        (Array.isArray(detail) ? detail.map((d: any) => d.msg).join(', ') : detail) ||
-        error.response?.data?.message ||
-        error.message ||
-        'Erro ao guardar. Verifique a ligação e tente novamente.';
+      const msg = getHumanReadableError(error, {
+        defaultMessage: 'Erro ao guardar. Verifique a ligação e tente novamente.',
+        service: 'backend',
+      });
       Alert.alert('Erro', msg);
     } finally {
       setSaving(false);
@@ -451,10 +474,21 @@ export default function WorkplacesScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Locais de Trabalho</Text>
-        <TouchableOpacity style={styles.addButton} onPress={openWizard}>
-          <Ionicons name="add" size={24} color="#fff" />
-        </TouchableOpacity>
+        <View style={{ flex: 1, paddingRight: 12 }}>
+          <Text style={styles.title}>{isEnterpriseOwner ? 'Locais da Empresa' : 'Locais de Trabalho'}</Text>
+          <Text style={styles.headerSubtitle}>
+            {isEnterpriseOwner
+              ? 'Crie locais e atribua-os aos funcionários na área da empresa.'
+              : isEmployee
+                ? 'Use apenas os locais que lhe foram atribuídos.'
+                : 'Configure os seus locais e horários.'}
+          </Text>
+        </View>
+        {!isEmployee && (
+          <TouchableOpacity style={styles.addButton} onPress={openWizard}>
+            <Ionicons name="add" size={24} color="#fff" />
+          </TouchableOpacity>
+        )}
       </View>
 
       <ScrollView
@@ -468,13 +502,17 @@ export default function WorkplacesScreen() {
             <Ionicons name="business-outline" size={64} color="#ccc" />
             <Text style={styles.emptyTitle}>Sem locais configurados</Text>
             <Text style={styles.emptyText}>
-              Adicione o seu primeiro local de trabalho para começar a registar ponto.
+              {isEmployee
+                ? 'A empresa ainda não lhe atribuiu nenhum local de trabalho.'
+                : 'Adicione o seu primeiro local de trabalho para começar a registar ponto.'}
             </Text>
-            <Button
-              title="Adicionar Local"
-              onPress={openWizard}
-              style={{ marginTop: 16 }}
-            />
+            {!isEmployee && (
+              <Button
+                title="Adicionar Local"
+                onPress={openWizard}
+                style={{ marginTop: 16 }}
+              />
+            )}
           </View>
         ) : (
           workplaces.map((workplace) => (
@@ -531,7 +569,7 @@ export default function WorkplacesScreen() {
               </View>
               
               <View style={styles.workplaceActions}>
-                {!workplace.isActive && (
+                {!isEnterpriseOwner && !workplace.isActive && (
                   <TouchableOpacity
                     style={styles.actionButton}
                     onPress={() => handleSetActive(workplace)}
@@ -540,14 +578,16 @@ export default function WorkplacesScreen() {
                     <Text style={[styles.actionText, { color: '#28a745' }]}>Ativar</Text>
                   </TouchableOpacity>
                 )}
-                
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={() => handleEditWorkplace(workplace)}
-                >
-                  <Ionicons name="pencil-outline" size={20} color="#1a73e8" />
-                  <Text style={[styles.actionText, { color: '#1a73e8' }]}>Editar</Text>
-                </TouchableOpacity>
+
+                {!isEmployee && (
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={() => handleEditWorkplace(workplace)}
+                  >
+                    <Ionicons name="pencil-outline" size={20} color="#1a73e8" />
+                    <Text style={[styles.actionText, { color: '#1a73e8' }]}>Editar</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
           ))
@@ -629,6 +669,11 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     color: '#333',
+  },
+  headerSubtitle: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 4,
   },
   addButton: {
     backgroundColor: '#1a73e8',

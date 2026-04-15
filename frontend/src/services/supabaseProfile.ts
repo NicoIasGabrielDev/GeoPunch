@@ -1,9 +1,3 @@
-/**
- * Supabase Profile Service
- * Manages user profiles directly in Supabase database
- * This service handles the synchronization between auth.users and public.profiles
- */
-
 import { supabase } from '../config/supabase';
 import { User } from '../types';
 
@@ -13,23 +7,30 @@ export interface ProfileData {
   name: string;
   employee_id?: string;
   role: string;
-  active_workplace_id?: string;
+  account_type: string;
+  enterprise_id?: string | null;
+  active_workplace_id?: string | null;
   created_at: string;
   updated_at: string;
 }
 
+const mapProfileToUser = (data: ProfileData): User => ({
+  id: data.id,
+  email: data.email,
+  name: data.name,
+  employeeId: data.employee_id,
+  role: data.role as User['role'],
+  accountType: (data.account_type || 'personal') as User['accountType'],
+  enterpriseId: data.enterprise_id,
+  activeWorkplaceId: data.active_workplace_id,
+  createdAt: data.created_at,
+});
+
 export const supabaseProfileService = {
-  /**
-   * Get current user profile from Supabase
-   * This reads from the public.profiles table
-   */
   getProfile: async (): Promise<User | null> => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        return null;
-      }
+      if (!user) return null;
 
       const { data, error } = await supabase
         .from('profiles')
@@ -38,40 +39,26 @@ export const supabaseProfileService = {
         .single();
 
       if (error) {
-        console.error('❌ Error fetching profile:', error);
-        
         if (error.code === 'PGRST116') {
           return await supabaseProfileService.createProfileFromAuth(user);
         }
-        
         throw error;
       }
 
-      return {
-        id: data.id,
-        email: data.email,
-        name: data.name,
-        employeeId: data.employee_id,
-        role: data.role,
-        activeWorkplaceId: data.active_workplace_id,
-        createdAt: data.created_at,
-      };
+      return mapProfileToUser(data as ProfileData);
     } catch (error) {
       console.error('❌ Error in getProfile:', error);
       throw error;
     }
   },
 
-  /**
-   * Create a new profile in Supabase
-   * This is called during registration or when a profile is missing
-   */
   createProfile: async (data: {
     id: string;
     email: string;
     name: string;
     employee_id?: string;
     role?: string;
+    account_type?: string;
   }): Promise<User> => {
     try {
       const profileData = {
@@ -79,7 +66,8 @@ export const supabaseProfileService = {
         email: data.email,
         name: data.name,
         employee_id: data.employee_id,
-        role: data.role || 'employee',
+        role: data.role || 'personal_user',
+        account_type: data.account_type || 'personal',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -90,113 +78,72 @@ export const supabaseProfileService = {
         .select()
         .single();
 
-      if (error) {
-        console.error('❌ Error creating profile:', error);
-        throw error;
-      }
-
-      return {
-        id: profile.id,
-        email: profile.email,
-        name: profile.name,
-        employeeId: profile.employee_id,
-        role: profile.role,
-        activeWorkplaceId: profile.active_workplace_id,
-        createdAt: profile.created_at,
-      };
+      if (error) throw error;
+      return mapProfileToUser(profile as ProfileData);
     } catch (error) {
       console.error('❌ Error in createProfile:', error);
       throw error;
     }
   },
 
-  /**
-   * Create profile from auth user metadata
-   * Used as fallback when profile doesn't exist
-   */
   createProfileFromAuth: async (authUser: any): Promise<User> => {
     const metadata = authUser.user_metadata || {};
-    
+    const accountType = metadata.account_type === 'enterprise' ? 'enterprise' : 'personal';
+
     return await supabaseProfileService.createProfile({
       id: authUser.id,
       email: authUser.email!,
       name: metadata.name || authUser.email!.split('@')[0],
       employee_id: metadata.employee_id,
-      role: metadata.role || 'employee',
+      role: accountType === 'enterprise' ? 'enterprise_owner' : 'personal_user',
+      account_type: accountType,
     });
   },
 
-  /**
-   * Update user profile
-   */
   updateProfile: async (updates: {
     name?: string;
     employee_id?: string;
     role?: string;
-    active_workplace_id?: string;
+    account_type?: string;
+    enterprise_id?: string | null;
+    active_workplace_id?: string | null;
   }): Promise<User> => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        throw new Error('No authenticated user');
-      }
-
-      const updateData = {
-        ...updates,
-        updated_at: new Date().toISOString(),
-      };
+      if (!user) throw new Error('No authenticated user');
 
       const { data, error } = await supabase
         .from('profiles')
-        .update(updateData)
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', user.id)
         .select()
         .single();
 
-      if (error) {
-        console.error('❌ Error updating profile:', error);
-        throw error;
-      }
-
-      return {
-        id: data.id,
-        email: data.email,
-        name: data.name,
-        employeeId: data.employee_id,
-        role: data.role,
-        activeWorkplaceId: data.active_workplace_id,
-        createdAt: data.created_at,
-      };
+      if (error) throw error;
+      return mapProfileToUser(data as ProfileData);
     } catch (error) {
       console.error('❌ Error in updateProfile:', error);
       throw error;
     }
   },
 
-  /**
-   * Set active workplace for user
-   */
   setActiveWorkplace: async (workplaceId: string | null): Promise<void> => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        throw new Error('No authenticated user');
-      }
+      if (!user) throw new Error('No authenticated user');
 
       const { error } = await supabase
         .from('profiles')
-        .update({ 
+        .update({
           active_workplace_id: workplaceId,
           updated_at: new Date().toISOString(),
         })
         .eq('id', user.id);
 
-      if (error) {
-        console.error('❌ Error setting active workplace:', error);
-        throw error;
-      }
+      if (error) throw error;
     } catch (error) {
       console.error('❌ Error in setActiveWorkplace:', error);
       throw error;

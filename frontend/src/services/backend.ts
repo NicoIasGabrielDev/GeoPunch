@@ -1,36 +1,59 @@
-import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from 'axios';
+import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig, isAxiosError } from 'axios';
 import { getAccessToken, getStoredAccessToken, refreshAuthSession, supabase } from '../config/supabase';
-import { ScheduleConfig, WorkdaysConfig } from '../types';
+import { isScreenshotSeedEnabled } from '../config/appMode';
+import { screenshotSeedService } from '../demo/screenshotSeed';
+import {
+  ScheduleConfig,
+  WorkdaysConfig,
+  Enterprise,
+  EnterpriseMembership,
+  EmployeeWorkplaceAssignment,
+} from '../types';
 
-// Get backend URL from environment
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
-if (!BACKEND_URL) {
+if (!BACKEND_URL && !isScreenshotSeedEnabled) {
   throw new Error('Missing EXPO_PUBLIC_BACKEND_URL. Configure it before creating a production build.');
 }
 
-// Remove trailing slash if present to avoid double slashes
-const baseUrl = BACKEND_URL.replace(/\/$/, '');
+const baseUrl = (BACKEND_URL ?? 'https://demo.local').replace(/\/$/, '');
+const BACKEND_TIMEOUT_MS = 90000;
+const BACKEND_WAKE_TIMEOUT_MS = 75000;
+const BACKEND_READY_TTL_MS = 8 * 60 * 1000;
+const RETRIABLE_METHODS = new Set(['get', 'head', 'options']);
+const RETRIABLE_STATUS_CODES = new Set([502, 503, 504]);
+const NETWORK_ERROR_CODES = new Set(['ECONNABORTED', 'ERR_NETWORK', 'ETIMEDOUT']);
 
-// Create axios instance for backend API
+const isRenderBackend = (() => {
+  try {
+    return new URL(baseUrl).hostname.endsWith('.onrender.com');
+  } catch {
+    return false;
+  }
+})();
+
 const backendApi: AxiosInstance = axios.create({
   baseURL: `${baseUrl}/api`,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  timeout: 60000,
+  headers: { 'Content-Type': 'application/json' },
+  timeout: BACKEND_TIMEOUT_MS,
 });
 
-/** Race a promise against a timeout; resolves null on timeout */
+const backendHealthApi = axios.create({
+  baseURL: baseUrl,
+  timeout: BACKEND_WAKE_TIMEOUT_MS,
+  headers: { 'Cache-Control': 'no-cache' },
+});
+
 const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T | null> =>
   Promise.race([
     promise,
     new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
   ]);
 
-type RetriableRequestConfig = InternalAxiosRequestConfig & {
-  _retry?: boolean;
-};
+type RetriableRequestConfig = InternalAxiosRequestConfig & { _retry?: boolean };
+
+let backendWakePromise: Promise<void> | null = null;
+let backendReadyAt = 0;
 
 type WorkplacePayloadInput = {
   name: string;
@@ -56,15 +79,11 @@ const DEFAULT_WORKDAYS: WorkdaysConfig = {
 };
 
 const toOptionalNumber = (value: number | string | null | undefined): number | undefined => {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim()) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : undefined;
   }
-
   return undefined;
 };
 
@@ -80,29 +99,16 @@ const normalizeSchedule = (data: WorkplacePayloadInput): ScheduleConfig | undefi
     data.schedule?.marginMinutes ?? data.marginMinutes ?? data.allowedMarginMinutes,
   );
 
-  if (!startTime || !endTime || marginMinutes === undefined) {
-    return undefined;
-  }
-
-  return {
-    startTime,
-    endTime,
-    marginMinutes,
-  };
+  if (!startTime || !endTime || marginMinutes === undefined) return undefined;
+  return { startTime, endTime, marginMinutes };
 };
 
 const normalizeWorkdays = (
   workdays: Partial<WorkdaysConfig> | null | undefined,
   includeDefaults: boolean,
 ): WorkdaysConfig | undefined => {
-  if (!workdays && !includeDefaults) {
-    return undefined;
-  }
-
-  return {
-    ...DEFAULT_WORKDAYS,
-    ...(workdays ?? {}),
-  };
+  if (!workdays && !includeDefaults) return undefined;
+  return { ...DEFAULT_WORKDAYS, ...(workdays ?? {}) };
 };
 
 const normalizeWorkplacePayload = (
@@ -130,59 +136,93 @@ const normalizeWorkplacePayload = (
 };
 
 const setAuthorizationHeader = (config: InternalAxiosRequestConfig, token: string | null) => {
-  if (!config.headers) {
-    return;
-  }
-
+  if (!config.headers) return;
   if (token) {
     if (typeof config.headers.set === 'function') {
       config.headers.set('Authorization', `Bearer ${token}`);
       return;
     }
-
     config.headers.Authorization = `Bearer ${token}`;
     return;
   }
-
   if (typeof config.headers.delete === 'function') {
     config.headers.delete('Authorization');
     return;
   }
-
   delete config.headers.Authorization;
 };
 
-// Request interceptor to add Supabase JWT token
+const hasFreshBackendWake = () =>
+  backendReadyAt > 0 && Date.now() - backendReadyAt < BACKEND_READY_TTL_MS;
+
+const isRetriableRequest = (config?: InternalAxiosRequestConfig) =>
+  RETRIABLE_METHODS.has((config?.method ?? 'get').toLowerCase());
+
+const isWakeupCandidateError = (error: AxiosError) => {
+  if (error.response?.status && RETRIABLE_STATUS_CODES.has(error.response.status)) return true;
+  if (!error.response && error.code && NETWORK_ERROR_CODES.has(error.code)) return true;
+
+  const message = error.message?.toLowerCase() ?? '';
+  return (
+    message.includes('timeout') ||
+    message.includes('network error') ||
+    message.includes('network failed') ||
+    message.includes('network request failed') ||
+    message.includes('failed to fetch')
+  );
+};
+
+export const ensureBackendReady = async (force = false): Promise<void> => {
+  if (isScreenshotSeedEnabled || !isRenderBackend) return;
+  if (!force && hasFreshBackendWake()) return;
+
+  if (!backendWakePromise) {
+    backendWakePromise = (async () => {
+      try {
+        const response = await backendHealthApi.get('/api/health');
+        if (response.status >= 200 && response.status < 500) {
+          backendReadyAt = Date.now();
+          return;
+        }
+      } catch (error) {
+        if (isAxiosError(error) && error.response) {
+          backendReadyAt = Date.now();
+          return;
+        }
+        throw error;
+      } finally {
+        backendWakePromise = null;
+      }
+    })();
+  }
+
+  await backendWakePromise;
+};
+
+export const primeBackendConnection = (): void => {
+  if (isScreenshotSeedEnabled || !isRenderBackend || hasFreshBackendWake()) return;
+  void ensureBackendReady().catch((error) => {
+    if (__DEV__) console.warn('⚠️ Backend wake-up failed:', error);
+  });
+};
+
 backendApi.interceptors.request.use(
   async (config) => {
     try {
       let token = await withTimeout(getAccessToken(), 10000);
-
-      // Fallback: read session directly from Supabase SDK if primary path failed
       if (!token) {
-        console.warn('⚠️ getAccessToken() returned null, trying direct Supabase session');
-        try {
-          const { data } = await supabase.auth.getSession();
-          token = data.session?.access_token ?? null;
-        } catch {
-          // ignore — will proceed without token
-        }
+        const { data } = await supabase.auth.getSession();
+        token = data.session?.access_token ?? null;
       }
-
-      if (__DEV__ && !token) {
-        console.warn('⚠️ No auth token available for request:', config.url);
-      }
-
       setAuthorizationHeader(config, token);
     } catch (error) {
       console.error('❌ Error getting access token:', error);
     }
     return config;
   },
-  (error) => Promise.reject(error)
+  (error) => Promise.reject(error),
 );
 
-// Response interceptor for error handling
 backendApi.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
@@ -190,25 +230,14 @@ backendApi.interceptors.response.use(
 
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
       originalRequest._retry = true;
-
       try {
-        // Try refreshing via Supabase SDK
         const refreshedSession = await withTimeout(refreshAuthSession(), 10000);
         let refreshedToken = refreshedSession?.access_token ?? null;
 
-        // Fallback: read stored token if refresh didn't return a new one
+        if (!refreshedToken) refreshedToken = await getStoredAccessToken();
         if (!refreshedToken) {
-          refreshedToken = await getStoredAccessToken();
-        }
-
-        // Last resort: try direct Supabase session
-        if (!refreshedToken) {
-          try {
-            const { data } = await supabase.auth.getSession();
-            refreshedToken = data.session?.access_token ?? null;
-          } catch {
-            // ignore
-          }
+          const { data } = await supabase.auth.getSession();
+          refreshedToken = data.session?.access_token ?? null;
         }
 
         if (refreshedToken) {
@@ -220,50 +249,43 @@ backendApi.interceptors.response.use(
       }
     }
 
-    if (__DEV__) {
-      console.error('❌ Request failed:', error.config?.url, '- Status:', error.response?.status);
-      console.error('❌ Error:', error.response?.data || error.message);
+    if (
+      isRenderBackend &&
+      originalRequest &&
+      !originalRequest._retry &&
+      isRetriableRequest(originalRequest) &&
+      isWakeupCandidateError(error)
+    ) {
+      originalRequest._retry = true;
+      try {
+        await ensureBackendReady(true);
+        return backendApi.request(originalRequest);
+      } catch (wakeError) {
+        if (__DEV__) console.error('❌ Backend wake-up retry failed:', wakeError);
+      }
     }
+
     return Promise.reject(error);
-  }
+  },
 );
 
-// ============================================================================
-// BACKEND API SERVICES
-// ============================================================================
-
-/**
- * Auth Services
- * Get current user profile from backend
- */
 export const authService = {
-  /**
-   * Get current user profile
-   * Backend validates the Supabase JWT and returns user data
-   */
   getMe: async () => {
+    if (isScreenshotSeedEnabled) return screenshotSeedService.getCurrentUser();
     const response = await backendApi.get('/auth/me');
     return response.data;
   },
 };
 
-/**
- * Workplace Services
- * Manage user workplaces
- */
 export const workplaceService = {
-  /**
-   * List all workplaces for current user
-   */
   list: async () => {
+    if (isScreenshotSeedEnabled) return screenshotSeedService.listWorkplaces();
     const response = await backendApi.get('/workplaces');
     return response.data;
   },
 
-  /**
-   * Create a new workplace
-   */
   create: async (data: WorkplacePayloadInput) => {
+    if (isScreenshotSeedEnabled) return screenshotSeedService.createWorkplace(data);
     const response = await backendApi.post('/workplaces', normalizeWorkplacePayload(data, {
       requireCoordinates: true,
       includeDefaultWorkdays: true,
@@ -271,10 +293,8 @@ export const workplaceService = {
     return response.data;
   },
 
-  /**
-   * Update an existing workplace
-   */
   update: async (id: string, data: WorkplacePayloadInput) => {
+    if (isScreenshotSeedEnabled) return screenshotSeedService.updateWorkplace(id, data);
     const response = await backendApi.put(`/workplaces/${id}`, normalizeWorkplacePayload(data, {
       requireCoordinates: false,
       includeDefaultWorkdays: false,
@@ -282,31 +302,20 @@ export const workplaceService = {
     return response.data;
   },
 
-  /**
-   * Set a workplace as active
-   */
   setActive: async (id: string) => {
+    if (isScreenshotSeedEnabled) return screenshotSeedService.setActiveWorkplace(id);
     const response = await backendApi.post(`/workplaces/${id}/activate`);
     return response.data;
   },
 
-  /**
-   * Get the active workplace
-   */
   getActive: async () => {
+    if (isScreenshotSeedEnabled) return screenshotSeedService.getActiveWorkplace();
     const response = await backendApi.get('/workplaces/active');
     return response.data;
   },
 };
 
-/**
- * Punch Services
- * Record clock in/out events
- */
 export const punchService = {
-  /**
-   * Create a new punch record
-   */
   create: async (data: {
     punchType: 'IN' | 'OUT' | 'BREAK_START' | 'BREAK_END';
     latitude: number;
@@ -315,38 +324,32 @@ export const punchService = {
     note?: string;
     method?: 'MANUAL' | 'GEOFENCE' | 'BLUETOOTH';
   }) => {
-    const response = await backendApi.post('/punch', data);
+    if (isScreenshotSeedEnabled) return screenshotSeedService.createPunch(data);
+    const response = await backendApi.post('/punch', {
+      ...data,
+      method: data.method === 'GEOFENCE' ? 'geofence_suggestion' : 'manual',
+    });
     return response.data;
   },
 };
 
-/**
- * Timesheet Services
- * Get timesheet data and status
- */
 export const timesheetService = {
-  /**
-   * Get today's status (current state, last punch, etc.)
-   */
   getTodayStatus: async () => {
+    if (isScreenshotSeedEnabled) return screenshotSeedService.getTodayStatus();
     const response = await backendApi.get('/timesheet/today');
     return response.data;
   },
 
-  /**
-   * Get timesheet for a date range
-   */
   getTimesheet: async (fromDate?: string, toDate?: string) => {
+    if (isScreenshotSeedEnabled) return screenshotSeedService.getTimesheet();
     const response = await backendApi.get('/timesheet', {
       params: { from_date: fromDate, to_date: toDate },
     });
     return response.data;
   },
 
-  /**
-   * Export timesheet as CSV
-   */
   exportCsv: async (fromDate: string, toDate: string) => {
+    if (isScreenshotSeedEnabled) return screenshotSeedService.exportCsv();
     const response = await backendApi.get('/export/timesheet.csv', {
       params: { from_date: fromDate, to_date: toDate },
       responseType: 'blob',
@@ -354,10 +357,8 @@ export const timesheetService = {
     return response.data;
   },
 
-  /**
-   * Export timesheet as XLSX
-   */
   exportXlsx: async (fromDate: string, toDate: string) => {
+    if (isScreenshotSeedEnabled) return screenshotSeedService.exportXlsx();
     const response = await backendApi.get('/export/timesheet.xlsx', {
       params: { from_date: fromDate, to_date: toDate },
       responseType: 'blob',
@@ -366,42 +367,63 @@ export const timesheetService = {
   },
 };
 
-/**
- * Admin Services
- * Admin-only endpoints
- */
-export const adminService = {
-  /**
-   * List all users (admin only)
-   */
-  listUsers: async () => {
-    const response = await backendApi.get('/admin/users');
+export const enterpriseService = {
+  bootstrap: async (data: { name: string; nif?: string }) => {
+    const response = await backendApi.post<Enterprise>('/enterprise/bootstrap', data);
     return response.data;
   },
 
-  /**
-   * List all workplaces (admin only)
-   */
-  listWorkplaces: async () => {
-    const response = await backendApi.get('/admin/workplaces');
+  getCurrent: async () => {
+    const response = await backendApi.get<Enterprise | null>('/enterprise');
     return response.data;
   },
 
-  /**
-   * Delete a workplace (admin only)
-   */
-  deleteWorkplace: async (id: string) => {
-    const response = await backendApi.delete(`/admin/workplaces/${id}`);
+  listMemberships: async () => {
+    const response = await backendApi.get<EnterpriseMembership[]>('/enterprise/memberships');
     return response.data;
   },
 
-  /**
-   * Assign workplace to user (admin only)
-   */
-  assignWorkplace: async (userId: string, workplaceId: string) => {
-    const response = await backendApi.post('/admin/assign-workplace', {
-      user_id: userId,
-      workplace_id: workplaceId,
+  listMyInvitations: async () => {
+    const response = await backendApi.get<EnterpriseMembership[]>('/enterprise/invitations/mine');
+    return response.data;
+  },
+
+  inviteByEmail: async (email: string) => {
+    const response = await backendApi.post<EnterpriseMembership>('/enterprise/invitations', { email });
+    return response.data;
+  },
+
+  acceptInvitation: async (membershipId: string) => {
+    const response = await backendApi.post<EnterpriseMembership>(`/enterprise/memberships/${membershipId}/accept`);
+    return response.data;
+  },
+
+  rejectInvitation: async (membershipId: string) => {
+    const response = await backendApi.post<EnterpriseMembership>(`/enterprise/memberships/${membershipId}/reject`);
+    return response.data;
+  },
+
+  removeMembership: async (membershipId: string) => {
+    const response = await backendApi.delete(`/enterprise/memberships/${membershipId}`);
+    return response.data;
+  },
+
+  assignWorkplace: async (employeeUserId: string, workplaceId: string) => {
+    const response = await backendApi.post<EmployeeWorkplaceAssignment>('/enterprise/workplace-assignments', {
+      employeeUserId,
+      workplaceId,
+    });
+    return response.data;
+  },
+
+  removeWorkplaceAssignment: async (assignmentId: string) => {
+    const response = await backendApi.delete(`/enterprise/workplace-assignments/${assignmentId}`);
+    return response.data;
+  },
+
+  getEmployeeTimesheet: async (employeeUserId: string, fromDate?: string, toDate?: string) => {
+    const response = await backendApi.get(`/enterprise/timesheets/${employeeUserId}`, {
+      params: { from_date: fromDate, to_date: toDate },
     });
     return response.data;
   },

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -8,560 +8,350 @@ import {
   Alert,
   TouchableOpacity,
   Modal,
-  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { workplaceService, adminService } from '../../src/services/backend';
+import {
+  ensureBackendReady,
+  enterpriseService,
+  workplaceService,
+} from '../../src/services/backend';
 import { Button } from '../../src/components/Button';
 import { Input } from '../../src/components/Input';
-import { Workplace, User } from '../../src/types';
+import { DayTimesheet, EnterpriseMembership, Workplace } from '../../src/types';
+import { getHumanReadableError } from '../../src/utils/network';
 
 export default function AdminScreen() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, refreshUser } = useAuth();
+  const [memberships, setMemberships] = useState<EnterpriseMembership[]>([]);
   const [workplaces, setWorkplaces] = useState<Workplace[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [editingWorkplace, setEditingWorkplace] = useState<Workplace | null>(null);
-  const [assignModalVisible, setAssignModalVisible] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [inviteEmail, setInviteEmail] = useState('');
   const [saving, setSaving] = useState(false);
-
-  const [formData, setFormData] = useState({
-    name: '',
-    latitude: '',
-    longitude: '',
-    radiusMeters: '150',
-    startTime: '09:00',
-    endTime: '18:00',
-    allowedMarginMinutes: '120',
-  });
+  const [selectedMember, setSelectedMember] = useState<EnterpriseMembership | null>(null);
+  const [assignModalVisible, setAssignModalVisible] = useState(false);
+  const [timesheetModalVisible, setTimesheetModalVisible] = useState(false);
+  const [memberTimesheet, setMemberTimesheet] = useState<DayTimesheet[]>([]);
 
   const loadData = useCallback(async () => {
-    if (!isAuthenticated) return;
-
     try {
-      setLoading(true);
-      
-      const [workplacesData, usersData] = await Promise.all([
-        adminService.listWorkplaces(),
-        adminService.listUsers(),
+      await ensureBackendReady();
+      const [membershipData, workplaceData] = await Promise.all([
+        enterpriseService.listMemberships(),
+        workplaceService.list(),
       ]);
-      setWorkplaces(workplacesData ?? []);
-      setUsers(usersData ?? []);
+      setMemberships(membershipData ?? []);
+      setWorkplaces((workplaceData ?? []).filter((item: Workplace) => item.contextType === 'enterprise'));
     } catch (error) {
-      console.error('Error loading data:', error);
-    } finally {
-      setLoading(false);
+      console.error('Error loading enterprise data:', error);
+      Alert.alert('Erro', getHumanReadableError(error, {
+        defaultMessage: 'Não foi possível carregar a área da empresa.',
+        service: 'backend',
+      }));
     }
-  }, [isAuthenticated]);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
-      if (isAuthenticated) {
+      if (user?.role === 'enterprise_owner') {
         loadData();
       }
-    }, [isAuthenticated, loadData])
+    }, [loadData, user?.role]),
   );
 
   const onRefresh = async () => {
     setRefreshing(true);
+    await refreshUser();
     await loadData();
     setRefreshing(false);
   };
 
-  const openAddModal = () => {
-    setEditingWorkplace(null);
-    setFormData({
-      name: '',
-      latitude: '',
-      longitude: '',
-      radiusMeters: '150',
-      startTime: '09:00',
-      endTime: '18:00',
-      allowedMarginMinutes: '120',
-    });
-    setModalVisible(true);
-  };
-
-  const openEditModal = (workplace: Workplace) => {
-    setEditingWorkplace(workplace);
-    setFormData({
-      name: workplace.name,
-      latitude: workplace.latitude.toString(),
-      longitude: workplace.longitude.toString(),
-      radiusMeters: workplace.radiusMeters.toString(),
-      startTime: workplace.schedule?.startTime ?? '09:00',
-      endTime: workplace.schedule?.endTime ?? '18:00',
-      allowedMarginMinutes: (workplace.schedule?.marginMinutes ?? 120).toString(),
-    });
-    setModalVisible(true);
-  };
-
-  const handleSave = async () => {
+  const handleInvite = async () => {
+    if (!inviteEmail.trim()) return;
     setSaving(true);
     try {
-      const data = {
-        name: formData.name,
-        latitude: parseFloat(formData.latitude),
-        longitude: parseFloat(formData.longitude),
-        radiusMeters: parseInt(formData.radiusMeters),
-        startTime: formData.startTime,
-        endTime: formData.endTime,
-        allowedMarginMinutes: parseInt(formData.allowedMarginMinutes),
-      };
-
-      if (editingWorkplace) {
-        await workplaceService.update(editingWorkplace.id, data);
-        Alert.alert('Sucesso', 'Local de trabalho atualizado');
-      } else {
-        await workplaceService.create(data);
-        Alert.alert('Sucesso', 'Local de trabalho criado');
-      }
-
-      setModalVisible(false);
-      loadData();
-    } catch (error: any) {
-      const message = error.response?.data?.detail || 'Erro ao guardar';
-      Alert.alert('Erro', message);
+      await enterpriseService.inviteByEmail(inviteEmail.trim().toLowerCase());
+      setInviteEmail('');
+      await loadData();
+      Alert.alert('Sucesso', 'Convite enviado com sucesso.');
+    } catch (error) {
+      Alert.alert('Erro', getHumanReadableError(error, {
+        defaultMessage: 'Não foi possível enviar o convite.',
+        service: 'backend',
+      }));
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = (workplace: Workplace) => {
-    Alert.alert(
-      'Confirmar',
-      `Deseja eliminar "${workplace.name}"?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await adminService.deleteWorkplace(workplace.id);
-              Alert.alert('Sucesso', 'Local de trabalho eliminado');
-              loadData();
-            } catch {
-              Alert.alert('Erro', 'Não foi possível eliminar');
-            }
-          },
+  const handleRemoveMember = async (membership: EnterpriseMembership) => {
+    Alert.alert('Remover associação', `Deseja remover ${membership.email} da empresa?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Remover',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await enterpriseService.removeMembership(membership.id);
+            await loadData();
+          } catch (error) {
+            Alert.alert('Erro', getHumanReadableError(error, {
+              defaultMessage: 'Não foi possível remover o funcionário.',
+              service: 'backend',
+            }));
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
-  const openAssignModal = (user: User) => {
-    setSelectedUser(user);
+  const openAssignModal = (membership: EnterpriseMembership) => {
+    setSelectedMember(membership);
     setAssignModalVisible(true);
   };
 
   const handleAssignWorkplace = async (workplaceId: string) => {
-    if (!selectedUser) return;
-
+    if (!selectedMember?.userId) return;
+    setSaving(true);
     try {
-      await adminService.assignWorkplace(selectedUser.id, workplaceId);
-      Alert.alert('Sucesso', 'Local de trabalho atribuído');
-      setAssignModalVisible(false);
-      loadData();
-    } catch (error: any) {
-      const message = error.response?.data?.detail || 'Erro ao atribuir';
-      Alert.alert('Erro', message);
+      await enterpriseService.assignWorkplace(selectedMember.userId, workplaceId);
+      await loadData();
+    } catch (error) {
+      Alert.alert('Erro', getHumanReadableError(error, {
+        defaultMessage: 'Não foi possível atribuir o local.',
+        service: 'backend',
+      }));
+    } finally {
+      setSaving(false);
     }
   };
 
-  if (user?.role !== 'admin') {
+  const openTimesheetModal = async (membership: EnterpriseMembership) => {
+    if (!membership.userId) return;
+    setSelectedMember(membership);
+    setTimesheetModalVisible(true);
+    try {
+      const data = await enterpriseService.getEmployeeTimesheet(membership.userId);
+      setMemberTimesheet(data ?? []);
+    } catch (error) {
+      Alert.alert('Erro', getHumanReadableError(error, {
+        defaultMessage: 'Não foi possível carregar os registos do funcionário.',
+        service: 'backend',
+      }));
+    }
+  };
+
+  if (user?.role !== 'enterprise_owner') {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.noAccessContainer}>
           <Ionicons name="lock-closed" size={64} color="#ccc" />
           <Text style={styles.noAccessTitle}>Acesso Restrito</Text>
-          <Text style={styles.noAccessText}>
-            Esta área é apenas para administradores
-          </Text>
+          <Text style={styles.noAccessText}>Esta área é apenas para contas empresa.</Text>
         </View>
       </SafeAreaView>
     );
   }
 
+  const acceptedMembers = memberships.filter((item) => item.status === 'accepted');
+  const pendingMembers = memberships.filter((item) => item.status === 'pending');
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
         contentContainerStyle={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#1a73e8']} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#1a73e8']} />}
       >
         <View style={styles.header}>
-          <Text style={styles.title}>Administração</Text>
+          <Text style={styles.title}>Empresa</Text>
+          <Text style={styles.subtitle}>{user.enterpriseName || 'Gestão de equipa e locais'}</Text>
         </View>
 
-        {/* Workplaces Section */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Locais de Trabalho</Text>
-            <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
-              <Ionicons name="add" size={24} color="#fff" />
-            </TouchableOpacity>
-          </View>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Convidar Funcionário</Text>
+          <Input
+            label="Email"
+            placeholder="funcionario@email.com"
+            value={inviteEmail}
+            onChangeText={setInviteEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
+          <Button title="Enviar Convite" onPress={handleInvite} loading={saving} />
+        </View>
 
-          {workplaces.map((workplace) => (
-            <View key={workplace.id} style={styles.workplaceCard}>
-              <View style={styles.workplaceInfo}>
-                <Text style={styles.workplaceName}>{workplace.name}</Text>
-                <Text style={styles.workplaceCoords}>
-                  {workplace.latitude.toFixed(4)}, {workplace.longitude.toFixed(4)}
-                </Text>
-                <Text style={styles.workplaceSchedule}>
-                  {workplace.schedule?.startTime ?? '—'} - {workplace.schedule?.endTime ?? '—'} | Raio: {workplace.radiusMeters}m
-                </Text>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Convites Pendentes</Text>
+          {pendingMembers.length === 0 ? (
+            <Text style={styles.mutedText}>Sem convites pendentes.</Text>
+          ) : (
+            pendingMembers.map((membership) => (
+              <View key={membership.id} style={styles.memberCard}>
+                <Text style={styles.memberName}>{membership.email}</Text>
+                <Text style={styles.memberMeta}>Pendente</Text>
               </View>
-              <View style={styles.workplaceActions}>
-                <TouchableOpacity
-                  style={styles.actionIcon}
-                  onPress={() => openEditModal(workplace)}
-                >
-                  <Ionicons name="pencil" size={20} color="#1a73e8" />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.actionIcon}
-                  onPress={() => handleDelete(workplace)}
-                >
-                  <Ionicons name="trash" size={20} color="#dc3545" />
-                </TouchableOpacity>
-              </View>
-            </View>
-          ))}
-
-          {workplaces.length === 0 && (
-            <Text style={styles.emptyText}>Nenhum local de trabalho</Text>
+            ))
           )}
         </View>
 
-        {/* Users Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Funcionários</Text>
-
-          {users.map((u) => (
-            <View key={u.id} style={styles.userCard}>
-              <View style={styles.userInfo}>
-                <Text style={styles.userName}>{u.name}</Text>
-                <Text style={styles.userEmail}>{u.email}</Text>
-                <Text style={styles.userWorkplace}>
-                  {u.activeWorkplaceId
-                    ? workplaces.find((w) => w.id === u.activeWorkplaceId)?.name || 'Local atribuído'
-                    : 'Sem local atribuído'}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Funcionários Associados</Text>
+          {acceptedMembers.length === 0 ? (
+            <Text style={styles.mutedText}>Ainda não existem funcionários associados.</Text>
+          ) : (
+            acceptedMembers.map((membership) => (
+              <View key={membership.id} style={styles.memberCard}>
+                <Text style={styles.memberName}>{membership.userName || membership.email}</Text>
+                <Text style={styles.memberMeta}>{membership.email}</Text>
+                <Text style={styles.memberMeta}>
+                  Locais atribuídos: {membership.assignedWorkplaceIds.length}
                 </Text>
+                <View style={styles.memberActions}>
+                  <Button title="Atribuir Locais" onPress={() => openAssignModal(membership)} size="small" style={{ flex: 1 }} />
+                  <Button title="Ver Registos" onPress={() => openTimesheetModal(membership)} size="small" variant="outline" style={{ flex: 1 }} />
+                </View>
+                <Button
+                  title="Remover"
+                  onPress={() => handleRemoveMember(membership)}
+                  size="small"
+                  variant="danger"
+                  style={{ marginTop: 10 }}
+                />
               </View>
-              <TouchableOpacity
-                style={styles.assignButton}
-                onPress={() => openAssignModal(u)}
-              >
-                <Ionicons name="location" size={20} color="#1a73e8" />
-              </TouchableOpacity>
-            </View>
-          ))}
+            ))
+          )}
         </View>
       </ScrollView>
 
-      {/* Workplace Modal */}
-      <Modal visible={modalVisible} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>
-              {editingWorkplace ? 'Editar Local' : 'Novo Local de Trabalho'}
-            </Text>
-
-            <ScrollView style={styles.modalScroll}>
-              <Input
-                label="Nome"
-                value={formData.name}
-                onChangeText={(text) => setFormData({ ...formData, name: text })}
-                placeholder="Escritório Central"
-              />
-
-              <Input
-                label="Latitude"
-                value={formData.latitude}
-                onChangeText={(text) => setFormData({ ...formData, latitude: text })}
-                keyboardType="numeric"
-                placeholder="38.7223"
-              />
-
-              <Input
-                label="Longitude"
-                value={formData.longitude}
-                onChangeText={(text) => setFormData({ ...formData, longitude: text })}
-                keyboardType="numeric"
-                placeholder="-9.1393"
-              />
-
-              <Input
-                label="Raio (metros)"
-                value={formData.radiusMeters}
-                onChangeText={(text) => setFormData({ ...formData, radiusMeters: text })}
-                keyboardType="numeric"
-                placeholder="150"
-              />
-
-              <Input
-                label="Hora de Início"
-                value={formData.startTime}
-                onChangeText={(text) => setFormData({ ...formData, startTime: text })}
-                placeholder="09:00"
-              />
-
-              <Input
-                label="Hora de Fim"
-                value={formData.endTime}
-                onChangeText={(text) => setFormData({ ...formData, endTime: text })}
-                placeholder="18:00"
-              />
-
-              <Input
-                label="Margem (minutos)"
-                value={formData.allowedMarginMinutes}
-                onChangeText={(text) => setFormData({ ...formData, allowedMarginMinutes: text })}
-                keyboardType="numeric"
-                placeholder="120"
-              />
-            </ScrollView>
-
-            <View style={styles.modalButtons}>
-              <Button
-                title="Cancelar"
-                onPress={() => setModalVisible(false)}
-                variant="outline"
-                style={{ flex: 1, marginRight: 8 }}
-              />
-              <Button
-                title="Guardar"
-                onPress={handleSave}
-                loading={saving}
-                style={{ flex: 1, marginLeft: 8 }}
-              />
-            </View>
+      <Modal visible={assignModalVisible} animationType="slide">
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setAssignModalVisible(false)}>
+              <Ionicons name="close" size={28} color="#111827" />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Atribuir Locais</Text>
+            <View style={{ width: 28 }} />
           </View>
-        </View>
+          <ScrollView contentContainerStyle={styles.modalContent}>
+            <Text style={styles.modalSubtitle}>{selectedMember?.userName || selectedMember?.email}</Text>
+            {workplaces.map((workplace) => {
+              const alreadyAssigned = !!selectedMember?.assignedWorkplaceIds.includes(workplace.id);
+              return (
+                <View key={workplace.id} style={styles.workplaceAssignCard}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.workplaceAssignName}>{workplace.name}</Text>
+                    <Text style={styles.workplaceAssignMeta}>Raio: {workplace.radiusMeters}m</Text>
+                  </View>
+                  <Button
+                    title={alreadyAssigned ? 'Atribuído' : 'Atribuir'}
+                    onPress={() => handleAssignWorkplace(workplace.id)}
+                    disabled={alreadyAssigned || saving}
+                    loading={saving && !alreadyAssigned}
+                    size="small"
+                    variant={alreadyAssigned ? 'secondary' : 'primary'}
+                  />
+                </View>
+              );
+            })}
+          </ScrollView>
+        </SafeAreaView>
       </Modal>
 
-      {/* Assign Workplace Modal */}
-      <Modal visible={assignModalVisible} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Atribuir Local de Trabalho</Text>
-            <Text style={styles.modalSubtitle}>para {selectedUser?.name}</Text>
-
-            <FlatList
-              data={workplaces}
-              keyExtractor={(item) => item.id}
-              style={styles.workplaceList}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.workplaceOption}
-                  onPress={() => handleAssignWorkplace(item.id)}
-                >
-                  <Ionicons name="location" size={24} color="#1a73e8" />
-                  <Text style={styles.workplaceOptionText}>{item.name}</Text>
-                </TouchableOpacity>
-              )}
-            />
-
-            <Button
-              title="Cancelar"
-              onPress={() => setAssignModalVisible(false)}
-              variant="outline"
-              style={{ marginTop: 16 }}
-            />
+      <Modal visible={timesheetModalVisible} animationType="slide">
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setTimesheetModalVisible(false)}>
+              <Ionicons name="close" size={28} color="#111827" />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Registos do Funcionário</Text>
+            <View style={{ width: 28 }} />
           </View>
-        </View>
+          <ScrollView contentContainerStyle={styles.modalContent}>
+            <Text style={styles.modalSubtitle}>{selectedMember?.userName || selectedMember?.email}</Text>
+            {memberTimesheet.length === 0 ? (
+              <Text style={styles.mutedText}>Sem registos disponíveis.</Text>
+            ) : (
+              memberTimesheet.map((day) => (
+                <View key={`${day.date}-${day.workplaceId}`} style={styles.timesheetCard}>
+                  <Text style={styles.timesheetDate}>{new Date(day.date).toLocaleDateString('pt-PT')}</Text>
+                  <Text style={styles.timesheetWorkplace}>{day.workplaceName}</Text>
+                  <Text style={styles.timesheetMeta}>Trabalhado: {day.netWorkedFormatted}</Text>
+                  <Text style={styles.timesheetMeta}>Estado: {day.status}</Text>
+                </View>
+              ))
+            )}
+          </ScrollView>
+        </SafeAreaView>
       </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  content: {
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  content: { padding: 16 },
+  header: { marginBottom: 16 },
+  title: { fontSize: 24, fontWeight: '700', color: '#111827' },
+  subtitle: { fontSize: 14, color: '#6b7280', marginTop: 4 },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
     padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
   },
-  header: {
-    marginBottom: 20,
+  cardTitle: { fontSize: 16, fontWeight: '700', color: '#111827', marginBottom: 12 },
+  mutedText: { fontSize: 14, color: '#6b7280' },
+  memberCard: {
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 10,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#333',
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionHeader: {
+  memberName: { fontSize: 15, fontWeight: '700', color: '#111827' },
+  memberMeta: { fontSize: 12, color: '#6b7280', marginTop: 4 },
+  memberActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  noAccessContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  noAccessTitle: { fontSize: 22, fontWeight: '700', color: '#333', marginTop: 16 },
+  noAccessText: { fontSize: 14, color: '#666', textAlign: 'center', marginTop: 8 },
+  modalContainer: { flex: 1, backgroundColor: '#f5f5f5' },
+  modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-  },
-  addButton: {
-    backgroundColor: '#1a73e8',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  workplaceCard: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    flexDirection: 'row',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  workplaceInfo: {
-    flex: 1,
-  },
-  workplaceName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  workplaceCoords: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 4,
-  },
-  workplaceSchedule: {
-    fontSize: 13,
-    color: '#666',
-    marginTop: 4,
-  },
-  workplaceActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  actionIcon: {
-    padding: 8,
-  },
-  userCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  userInfo: {
-    flex: 1,
-  },
-  userName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  userEmail: {
-    fontSize: 13,
-    color: '#666',
-    marginTop: 2,
-  },
-  userWorkplace: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 4,
-  },
-  assignButton: {
-    padding: 8,
-  },
-  emptyText: {
-    textAlign: 'center',
-    color: '#999',
-    padding: 20,
-  },
-  noAccessContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-  },
-  noAccessTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
-    marginTop: 16,
-  },
-  noAccessText: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    maxHeight: '80%',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  modalSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  modalScroll: {
-    maxHeight: 400,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    marginTop: 16,
-  },
-  workplaceList: {
-    maxHeight: 300,
-  },
-  workplaceOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: '#e5e7eb',
   },
-  workplaceOptionText: {
-    fontSize: 16,
-    color: '#333',
-    marginLeft: 12,
+  modalTitle: { fontSize: 17, fontWeight: '700', color: '#111827' },
+  modalContent: { padding: 16 },
+  modalSubtitle: { fontSize: 14, color: '#6b7280', marginBottom: 16 },
+  workplaceAssignCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
   },
+  workplaceAssignName: { fontSize: 15, fontWeight: '700', color: '#111827' },
+  workplaceAssignMeta: { fontSize: 12, color: '#6b7280', marginTop: 4 },
+  timesheetCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+  },
+  timesheetDate: { fontSize: 14, fontWeight: '700', color: '#111827' },
+  timesheetWorkplace: { fontSize: 13, color: '#374151', marginTop: 4 },
+  timesheetMeta: { fontSize: 12, color: '#6b7280', marginTop: 4 },
 });

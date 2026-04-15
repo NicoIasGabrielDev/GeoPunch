@@ -5,14 +5,18 @@ import {
   StyleSheet,
   FlatList,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { timesheetService } from '../../src/services/backend';
+import { useAuth } from '../../src/contexts/AuthContext';
+import { ensureBackendReady, timesheetService } from '../../src/services/backend';
 import { DayTimesheet } from '../../src/types';
+import { getHumanReadableError } from '../../src/utils/network';
 
 export default function HistoryScreen() {
+  const { user } = useAuth();
   const [timesheet, setTimesheet] = useState<DayTimesheet[]>([]);
   const [, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -26,10 +30,18 @@ export default function HistoryScreen() {
   const loadTimesheet = async () => {
     try {
       setLoading(true);
+      await ensureBackendReady();
       const data = await timesheetService.getTimesheet();
       setTimesheet(data ?? []);
     } catch (error) {
       console.error('Error loading timesheet:', error);
+      Alert.alert(
+        'Erro',
+        getHumanReadableError(error, {
+          defaultMessage: 'Não foi possível carregar o histórico.',
+          service: 'backend',
+        }),
+      );
     } finally {
       setLoading(false);
     }
@@ -152,6 +164,18 @@ export default function HistoryScreen() {
     </View>
   );
   };
+
+  if (user?.role === 'enterprise_owner') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.emptyContainer}>
+          <Ionicons name="business" size={64} color="#ccc" />
+          <Text style={styles.emptyText}>O histórico individual não está disponível para conta empresa.</Text>
+          <Text style={styles.emptySubtext}>Consulte os registos dos funcionários na área Empresa.</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>

@@ -1,12 +1,13 @@
 import { createClient, Session } from '@supabase/supabase-js';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { isScreenshotSeedEnabled } from './appMode';
 
 // Get environment variables
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? 'https://demo.supabase.co';
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? 'demo-anon-key';
 
-if(!supabaseUrl || !supabaseAnonKey) {
+if ((!process.env.EXPO_PUBLIC_SUPABASE_URL || !process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY) && !isScreenshotSeedEnabled) {
   throw new Error('Missing Supabase environment variables. Please check your .env file.');
 }
 

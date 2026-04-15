@@ -2,9 +2,26 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { Session } from '@supabase/supabase-js';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import * as Linking from 'expo-linking';
+import * as WebBrowser from 'expo-web-browser';
 import { clearStoredTokens, storeSessionTokens, supabase } from '../config/supabase';
+import { isScreenshotSeedEnabled } from '../config/appMode';
+import { screenshotSeedService } from '../demo/screenshotSeed';
 import { supabaseProfileService } from '../services/supabaseProfile';
-import { User } from '../types';
+import { enterpriseService } from '../services/backend';
+import { User, AccountType } from '../types';
+
+WebBrowser.maybeCompleteAuthSession();
+
+export interface RegisterOptions {
+  email: string;
+  password?: string;
+  name: string;
+  employeeId?: string;
+  accountType: AccountType;
+  companyName?: string;
+  nif?: string;
+}
 
 interface AuthContextType {
   user: User | null;
@@ -12,12 +29,22 @@ interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, name: string, employeeId?: string) => Promise<void>;
+  loginWithGoogle: (options?: Partial<RegisterOptions>) => Promise<void>;
+  register: (options: RegisterOptions) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const parseAuthTokensFromUrl = (url: string) => {
+  const [, hashPart = ''] = url.split('#');
+  const queryPart = url.includes('?') ? url.split('?')[1]?.split('#')[0] ?? '' : '';
+  const params = new URLSearchParams(hashPart || queryPart);
+  const accessToken = params.get('access_token');
+  const refreshToken = params.get('refresh_token');
+  return { accessToken, refreshToken };
+};
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -26,43 +53,102 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const loggingOut = useRef(false);
   const activeLoginRef = useRef(false);
 
-  const logSupabaseToken = useCallback((source: string, currentSession: Session | null) => {
-    if (!currentSession) {
-      console.log(`[AUTH][${source}] No session/token returned by Supabase`);
-      return;
-    }
-
-    console.log(`[AUTH][${source}] access_token:`, currentSession.access_token ?? null);
-    console.log(`[AUTH][${source}] refresh_token:`, currentSession.refresh_token ?? null);
-    console.log(`[AUTH][${source}] expires_at:`, currentSession.expires_at ?? null);
-  }, []);
-
   const fetchUserProfile = useCallback(async () => {
     try {
       const userData = await supabaseProfileService.getProfile();
       if (!userData) {
-        console.warn('No user profile found');
-        // Don't force logout during active login/register — profile may not exist yet
-        if (!activeLoginRef.current) {
-          setUser(null);
-        }
-        return;
+        setUser(null);
+        return null;
       }
+
+      if (userData.enterpriseId) {
+        try {
+          const enterprise = await enterpriseService.getCurrent();
+          const enrichedUser = {
+            ...userData,
+            enterpriseName: enterprise?.name ?? userData.enterpriseName ?? null,
+          };
+          setUser(enrichedUser);
+          return enrichedUser;
+        } catch (error) {
+          console.error('❌ Error fetching enterprise summary:', error);
+        }
+      }
+
       setUser(userData);
-    } catch (error: any) {
+      return userData;
+    } catch (error) {
       console.error('❌ Error fetching user profile:', error);
-      // Don't force logout — the session is valid even if the profile fetch fails
-      // (e.g., network issue, backend cold start, Supabase latency)
       setUser(null);
+      return null;
     }
   }, []);
 
-  const checkAuth = useCallback(async () => {
-    try {
-      // getSession() reads from local storage (fast, no network call)
-      const { data: { session } } = await supabase.auth.getSession();
+  const applyPostRegistrationSetup = useCallback(async (options?: Partial<RegisterOptions>) => {
+    if (!options) {
+      await fetchUserProfile();
+      return;
+    }
 
-      if (!session) {
+    const accountType = options.accountType ?? 'personal';
+    const currentProfile = await fetchUserProfile();
+
+    if (accountType === 'enterprise') {
+      await supabaseProfileService.updateProfile({
+        name: options.name?.trim(),
+        employee_id: options.employeeId?.trim() || undefined,
+        role: 'enterprise_owner',
+        account_type: 'enterprise',
+      });
+
+      if (options.companyName?.trim()) {
+        await enterpriseService.bootstrap({
+          name: options.companyName.trim(),
+          nif: options.nif?.trim() || undefined,
+        });
+      }
+    } else if (currentProfile) {
+      await supabaseProfileService.updateProfile({
+        name: options.name?.trim() || currentProfile.name,
+        employee_id: options.employeeId?.trim() || undefined,
+        role: currentProfile.enterpriseId ? 'employee' : 'personal_user',
+        account_type: 'personal',
+      });
+    }
+
+    await fetchUserProfile();
+  }, [fetchUserProfile]);
+
+  const createSessionFromUrl = useCallback(async (url: string, options?: Partial<RegisterOptions>) => {
+    const { accessToken, refreshToken } = parseAuthTokensFromUrl(url);
+    if (!accessToken || !refreshToken) return null;
+
+    const { data, error } = await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+
+    if (error || !data.session) {
+      throw error ?? new Error('Não foi possível concluir o login com Google.');
+    }
+
+    setSession(data.session);
+    await storeSessionTokens(data.session);
+    await applyPostRegistrationSetup(options);
+    return data.session;
+  }, [applyPostRegistrationSetup]);
+
+  const checkAuth = useCallback(async () => {
+    if (isScreenshotSeedEnabled) {
+      setUser(screenshotSeedService.getCurrentUser());
+      setSession(null);
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      if (!currentSession) {
         setSession(null);
         setUser(null);
         await clearStoredTokens();
@@ -70,14 +156,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return;
       }
 
-      // Check if token is expired or about to expire (within 60s)
-      const expiresAt = session.expires_at ?? 0;
+      const expiresAt = currentSession.expires_at ?? 0;
       const nowInSeconds = Math.floor(Date.now() / 1000);
       if (expiresAt - nowInSeconds < 60) {
-        // Token expired - try refresh (network call)
         const { data, error } = await supabase.auth.refreshSession();
         if (error || !data.session) {
-          // Refresh token also expired - force login
           setSession(null);
           setUser(null);
           await clearStoredTokens();
@@ -85,18 +168,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           return;
         }
         setSession(data.session);
-        logSupabaseToken('checkAuth.refreshSession', data.session);
         await storeSessionTokens(data.session);
       } else {
-        setSession(session);
-        logSupabaseToken('checkAuth.getSession', session);
-        await storeSessionTokens(session);
+        setSession(currentSession);
+        await storeSessionTokens(currentSession);
       }
 
-      // Unblock loading BEFORE the backend profile fetch
-      // Prevents infinite splash when Render has cold-start delay
       setIsLoading(false);
-      fetchUserProfile(); // fire-and-forget, UI updates when it resolves
+      void fetchUserProfile();
     } catch (error) {
       console.error('Error checking auth:', error);
       setSession(null);
@@ -104,122 +183,132 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       await clearStoredTokens();
       setIsLoading(false);
     }
-  }, [fetchUserProfile, logSupabaseToken]);
+  }, [fetchUserProfile]);
 
   useEffect(() => {
-    // Check for existing session on mount
-    checkAuth();
+    if (isScreenshotSeedEnabled) {
+      void checkAuth();
+      return;
+    }
 
-    // Listen for auth state changes
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, newSession) => {
-      // If we're in the middle of logging out or actively logging in, ignore events
-      if (loggingOut.current || activeLoginRef.current) {
-        return;
-      }
+    void checkAuth();
+
+    const subscription = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      if (loggingOut.current || activeLoginRef.current) return;
 
       if (event === 'SIGNED_OUT' || !newSession) {
         setSession(null);
         setUser(null);
         await clearStoredTokens();
-      } else if (event === 'TOKEN_REFRESHED') {
-        setSession(newSession);
-        logSupabaseToken('onAuthStateChange.TOKEN_REFRESHED', newSession);
-        await storeSessionTokens(newSession);
-      } else if (event === 'SIGNED_IN') {
-        setSession(newSession);
-        logSupabaseToken('onAuthStateChange.SIGNED_IN', newSession);
-        await storeSessionTokens(newSession);
+        return;
+      }
+
+      setSession(newSession);
+      await storeSessionTokens(newSession);
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         await fetchUserProfile();
-      } else if (newSession) {
-        setSession(newSession);
-        logSupabaseToken(`onAuthStateChange.${event}`, newSession);
-        await storeSessionTokens(newSession);
       }
     });
 
-    return () => {
-      authListener.subscription.unsubscribe();
+    const handleIncomingUrl = async ({ url }: { url: string }) => {
+      try {
+        await createSessionFromUrl(url);
+      } catch (error) {
+        console.error('OAuth deep link error:', error);
+      }
     };
-  }, [checkAuth, fetchUserProfile, logSupabaseToken]);
+
+    const urlSubscription = Linking.addEventListener('url', handleIncomingUrl);
+
+    return () => {
+      subscription.data.subscription.unsubscribe();
+      urlSubscription.remove();
+    };
+  }, [checkAuth, createSessionFromUrl, fetchUserProfile]);
 
   const login = async (email: string, password: string) => {
+    if (isScreenshotSeedEnabled) {
+      void password;
+      setUser(await screenshotSeedService.login(email));
+      setSession(null);
+      setIsLoading(false);
+      return;
+    }
+
     activeLoginRef.current = true;
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (error) {
-        console.error('❌ Supabase login error:', error);
-        throw error;
-      }
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
 
       setSession(data.session);
-      logSupabaseToken('login.signInWithPassword', data.session);
       await storeSessionTokens(data.session);
-      
-      if (data.session) {
-        await fetchUserProfile();
-      }
+      await fetchUserProfile();
     } finally {
       activeLoginRef.current = false;
     }
   };
 
-  const register = async (email: string, password: string, name: string, employeeId?: string) => {
+  const loginWithGoogle = async (options?: Partial<RegisterOptions>) => {
     activeLoginRef.current = true;
     try {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
+      const redirectTo = Linking.createURL('auth/callback');
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
         options: {
-          data: {
-            name,
-            employee_id: employeeId,
+          redirectTo,
+          skipBrowserRedirect: true,
+          queryParams: {
+            prompt: 'select_account',
           },
         },
       });
 
-      if (error) {
-        console.error('❌ Supabase signup error:', error);
-        throw error;
+      if (error || !data?.url) {
+        throw error ?? new Error('Não foi possível iniciar o login com Google.');
       }
 
-      logSupabaseToken('register.signUp', data.session);
+      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+      if (result.type !== 'success') {
+        throw new Error('Login com Google cancelado.');
+      }
+
+      await createSessionFromUrl(result.url, options);
+    } finally {
+      activeLoginRef.current = false;
+    }
+  };
+
+  const register = async (options: RegisterOptions) => {
+    if (isScreenshotSeedEnabled) {
+      setUser(await screenshotSeedService.register(options.email, options.name, options.employeeId));
+      setSession(null);
+      setIsLoading(false);
+      return;
+    }
+
+    activeLoginRef.current = true;
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: options.email,
+        password: options.password!,
+        options: {
+          data: {
+            name: options.name,
+            employee_id: options.employeeId,
+            account_type: options.accountType,
+          },
+        },
+      });
+
+      if (error) throw error;
 
       if (data.session && data.user) {
         setSession(data.session);
         await storeSessionTokens(data.session);
-        
-        try {
-          // Small delay to ensure trigger completes
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          await fetchUserProfile();
-        } catch (profileError: any) {
-          console.error('❌ Error fetching profile after registration:', profileError);
-          
-          // Fallback: manually create profile if trigger failed
-          try {
-            const profile = await supabaseProfileService.createProfile({
-              id: data.user.id,
-              email,
-              name,
-              employee_id: employeeId,
-            });
-            setUser(profile);
-          } catch (createError: any) {
-            // If profile already exists (from trigger), fetch it
-            if (createError.code === '23505') {
-              await fetchUserProfile();
-            } else {
-              throw new Error('Erro ao criar perfil: ' + (createError.message || 'Erro desconhecido'));
-            }
-          }
-        }
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await applyPostRegistrationSetup(options);
       } else {
-        // Email confirmation required
-        throw new Error('Registro criado! Verifique seu email para confirmar a conta antes de fazer login.');
+        throw new Error('Registo criado. Verifique o email para confirmar a conta.');
       }
     } finally {
       activeLoginRef.current = false;
@@ -227,45 +316,41 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const logout = async () => {
-    // Set flag to prevent onAuthStateChange from re-setting session
-    loggingOut.current = true;
+    if (isScreenshotSeedEnabled) {
+      await screenshotSeedService.logout();
+      setSession(null);
+      setUser(null);
+      setIsLoading(false);
+      return;
+    }
 
-    // Immediately clear React state — this makes isAuthenticated false
+    loggingOut.current = true;
     setSession(null);
     setUser(null);
     setIsLoading(false);
 
-    // Clear persisted tokens
     try {
       await clearStoredTokens();
-    } catch (e) {
-      console.error('Error clearing tokens (ignored):', e);
-    }
-
-    // Tell Supabase SDK to clear its internal session cache
-    try {
       await supabase.auth.signOut({ scope: 'local' });
-    } catch (e) {
-      console.error('Error during signOut (ignored):', e);
-    }
 
-    // Also manually remove the Supabase SDK's own storage keys
-    try {
       const storageKey = `sb-${new URL(process.env.EXPO_PUBLIC_SUPABASE_URL!).hostname.split('.')[0]}-auth-token`;
       if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
         localStorage.removeItem(storageKey);
       } else {
         await SecureStore.deleteItemAsync(storageKey);
       }
-    } catch (e) {
-      // Key might not exist or format might differ, that's ok
-      void e;
+    } catch (error) {
+      console.error('Logout error (ignored):', error);
+    } finally {
+      loggingOut.current = false;
     }
-
-    loggingOut.current = false;
   };
 
   const refreshUser = async () => {
+    if (isScreenshotSeedEnabled) {
+      setUser(screenshotSeedService.getCurrentUser());
+      return;
+    }
     await fetchUserProfile();
   };
 
@@ -275,8 +360,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         user,
         session,
         isLoading,
-        isAuthenticated: !!session,
+        isAuthenticated: isScreenshotSeedEnabled ? !!user : !!session,
         login,
+        loginWithGoogle,
         register,
         logout,
         refreshUser,

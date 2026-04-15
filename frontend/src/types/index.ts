@@ -1,10 +1,47 @@
+export type UserRole = 'personal_user' | 'enterprise_owner' | 'employee';
+export type AccountType = 'personal' | 'enterprise';
+
 export interface User {
   id: string;
   email: string;
   name: string;
   employeeId?: string;
-  role: string;
-  activeWorkplaceId?: string;
+  role: UserRole;
+  accountType: AccountType;
+  enterpriseId?: string | null;
+  enterpriseName?: string | null;
+  activeWorkplaceId?: string | null;
+  createdAt: string;
+}
+
+export interface Enterprise {
+  id: string;
+  name: string;
+  nif?: string | null;
+  ownerUserId: string;
+  createdAt: string;
+}
+
+export interface EnterpriseMembership {
+  id: string;
+  enterpriseId: string;
+  email: string;
+  userId?: string | null;
+  userName?: string | null;
+  status: 'pending' | 'accepted' | 'rejected' | 'removed';
+  invitedBy: string;
+  acceptedAt?: string | null;
+  respondedAt?: string | null;
+  createdAt: string;
+  assignedWorkplaceIds: string[];
+}
+
+export interface EmployeeWorkplaceAssignment {
+  id: string;
+  enterpriseId: string;
+  employeeUserId: string;
+  workplaceId: string;
+  assignedBy: string;
   createdAt: string;
 }
 
@@ -36,6 +73,10 @@ export interface Workplace {
   configuredAt: string;
   isActive: boolean;
   createdAt: string;
+  contextType: 'personal' | 'enterprise';
+  enterpriseId?: string | null;
+  assignmentId?: string | null;
+  assignedEmployeeCount?: number | null;
 }
 
 export interface TodayStatus {

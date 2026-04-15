@@ -12,9 +12,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { timesheetService } from '../../src/services/backend';
+import { useAuth } from '../../src/contexts/AuthContext';
+import { ensureBackendReady, timesheetService } from '../../src/services/backend';
+import { getHumanReadableError } from '../../src/utils/network';
 
 export default function ExportScreen() {
+  const { user } = useAuth();
   const [fromDate, setFromDate] = useState(() => {
     const date = new Date();
     date.setDate(date.getDate() - 30);
@@ -35,6 +38,7 @@ export default function ExportScreen() {
   const handleExport = async (format: 'csv' | 'xlsx') => {
     setLoading(format);
     try {
+      await ensureBackendReady();
       const data = format === 'csv'
         ? await timesheetService.exportCsv(fromDate, toDate)
         : await timesheetService.exportXlsx(fromDate, toDate);
@@ -74,7 +78,13 @@ export default function ExportScreen() {
       }
     } catch (error: any) {
       console.error('Export error:', error);
-      Alert.alert('Erro', 'Não foi possível exportar os dados');
+      Alert.alert(
+        'Erro',
+        getHumanReadableError(error, {
+          defaultMessage: 'Não foi possível exportar os dados',
+          service: 'backend',
+        }),
+      );
     } finally {
       setLoading(null);
     }
@@ -99,6 +109,22 @@ export default function ExportScreen() {
     setFromDate(start.toISOString().split('T')[0]);
     setToDate(end.toISOString().split('T')[0]);
   };
+
+  if (user?.role === 'enterprise_owner') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={[styles.content, { justifyContent: 'center', flex: 1 }]}>
+          <Ionicons name="business" size={64} color="#ccc" style={{ alignSelf: 'center' }} />
+          <Text style={[styles.title, { textAlign: 'center', marginTop: 16 }]}>
+            Exportação individual indisponível
+          </Text>
+          <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 12 }]}>
+            A conta empresa consulta os registos dos funcionários na área Empresa.
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>

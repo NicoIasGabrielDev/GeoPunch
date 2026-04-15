@@ -15,13 +15,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/contexts/AuthContext';
 import { Button } from '../../src/components/Button';
 import { Input } from '../../src/components/Input';
+import { getHumanReadableError } from '../../src/utils/network';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<'password' | 'google' | null>(null);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
-  const { login } = useAuth();
+  const { login, loginWithGoogle } = useAuth();
   const router = useRouter();
 
   const validate = () => {
@@ -35,16 +36,29 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (!validate()) return;
-
-    setLoading(true);
+    setLoading('password');
     try {
       await login(email.toLowerCase().trim(), password);
       router.replace('/(tabs)');
     } catch (error: any) {
-      const message = error?.message || 'Erro ao fazer login';
-      Alert.alert('Erro', message);
+      Alert.alert('Erro', getHumanReadableError(error, {
+        defaultMessage: 'Erro ao fazer login',
+        service: 'supabase',
+      }));
     } finally {
-      setLoading(false);
+      setLoading(null);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setLoading('google');
+    try {
+      await loginWithGoogle();
+      router.replace('/(tabs)');
+    } catch (error: any) {
+      Alert.alert('Erro', error?.message || 'Não foi possível entrar com Google.');
+    } finally {
+      setLoading(null);
     }
   };
 
@@ -54,10 +68,7 @@ export default function LoginScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-        >
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           <View style={styles.header}>
             <View style={styles.iconCircle}>
               <Ionicons name="location" size={40} color="#fff" />
@@ -89,8 +100,21 @@ export default function LoginScreen() {
             <Button
               title="Entrar"
               onPress={handleLogin}
-              loading={loading}
+              loading={loading === 'password'}
               style={styles.button}
+            />
+
+            <View style={styles.dividerRow}>
+              <View style={styles.divider} />
+              <Text style={styles.dividerText}>ou</Text>
+              <View style={styles.divider} />
+            </View>
+
+            <Button
+              title="Entrar com Google"
+              onPress={handleGoogleLogin}
+              loading={loading === 'google'}
+              variant="outline"
             />
 
             <View style={styles.footer}>
@@ -107,22 +131,10 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    padding: 24,
-    justifyContent: 'center',
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 40,
-  },
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  keyboardView: { flex: 1 },
+  scrollContent: { flexGrow: 1, padding: 24, justifyContent: 'center' },
+  header: { alignItems: 'center', marginBottom: 40 },
   iconCircle: {
     width: 80,
     height: 80,
@@ -132,16 +144,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#1a73e8',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-  },
+  title: { fontSize: 28, fontWeight: '700', color: '#1a73e8', marginBottom: 8 },
+  subtitle: { fontSize: 16, color: '#666' },
   form: {
     backgroundColor: '#fff',
     borderRadius: 16,
@@ -152,21 +156,11 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  button: {
-    marginTop: 8,
-  },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: 20,
-  },
-  footerText: {
-    color: '#666',
-    fontSize: 14,
-  },
-  footerLink: {
-    color: '#1a73e8',
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  button: { marginTop: 8 },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 16 },
+  divider: { flex: 1, height: 1, backgroundColor: '#e5e7eb' },
+  dividerText: { marginHorizontal: 12, color: '#666', fontSize: 13 },
+  footer: { flexDirection: 'row', justifyContent: 'center', marginTop: 20 },
+  footerText: { color: '#666', fontSize: 14 },
+  footerLink: { color: '#1a73e8', fontSize: 14, fontWeight: '600' },
 });

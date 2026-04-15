@@ -6,18 +6,25 @@ import {
   ScrollView,
   RefreshControl,
   Alert,
-  TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import { isScreenshotSeedEnabled } from '../../src/config/appMode';
 import { useAuth } from '../../src/contexts/AuthContext';
-import { timesheetService, punchService, workplaceService } from '../../src/services/backend';
+import { screenshotSeedService } from '../../src/demo/screenshotSeed';
+import {
+  ensureBackendReady,
+  timesheetService,
+  punchService,
+  workplaceService,
+} from '../../src/services/backend';
 import { StatusCard } from '../../src/components/StatusCard';
 import { Button } from '../../src/components/Button';
 import { TodayStatus, Workplace, LocationData } from '../../src/types';
+import { getHumanReadableError } from '../../src/utils/network';
 import {
   calculateDistance,
   requestLocationPermissions,
@@ -25,10 +32,7 @@ import {
 } from '../../src/utils/location';
 
 interface TodayStatusExtended extends Omit<TodayStatus, 'workplace'> {
-  workplace: ({
-    clockInWindow?: string;
-    clockOutWindow?: string;
-  } & Workplace) | null;
+  workplace: (({ clockInWindow?: string; clockOutWindow?: string }) & Workplace) | null;
 }
 
 export default function HomeScreen() {
@@ -42,57 +46,50 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [locationPermission, setLocationPermission] = useState<boolean>(false);
-  const [isWorkday, setIsWorkday] = useState<boolean>(true);
+
+  const isEnterpriseOwner = user?.role === 'enterprise_owner';
 
   useFocusEffect(
     useCallback(() => {
-      // Only load data if authenticated
       if (isAuthenticated) {
-        loadData();
+        if (isEnterpriseOwner) {
+          setLoading(false);
+        } else {
+          loadData();
+        }
       } else {
         setLoading(false);
       }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isAuthenticated])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isAuthenticated, isEnterpriseOwner])
   );
 
   useEffect(() => {
-    setupLocation();
+    if (!isEnterpriseOwner) {
+      setupLocation();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isEnterpriseOwner]);
 
   useEffect(() => {
     if (currentLocation && workplace) {
-      const dist = calculateDistance(
+      setDistance(calculateDistance(
         currentLocation.latitude,
         currentLocation.longitude,
         workplace.latitude,
-        workplace.longitude
-      );
-      setDistance(dist);
+        workplace.longitude,
+      ));
     }
   }, [currentLocation, workplace]);
 
-  // Check if today is a workday
-  useEffect(() => {
-    if (workplace?.workdays) {
-      const dayMap: { [key: number]: keyof typeof workplace.workdays } = {
-        0: 'sunday',
-        1: 'monday',
-        2: 'tuesday',
-        3: 'wednesday',
-        4: 'thursday',
-        5: 'friday',
-        6: 'saturday',
-      };
-      const today = new Date().getDay();
-      setIsWorkday(workplace.workdays[dayMap[today]] || false);
-    }
-  }, [workplace]);
-
   const setupLocation = async () => {
+    if (isScreenshotSeedEnabled) {
+      setLocationPermission(true);
+      setCurrentLocation(screenshotSeedService.getCurrentLocation());
+      return;
+    }
+
     try {
-      // Check if location services are available
       const servicesEnabled = await Location.hasServicesEnabledAsync();
       if (!servicesEnabled) {
         setLocationPermission(false);
@@ -101,17 +98,12 @@ export default function HomeScreen() {
 
       const { status: foregroundStatus } = await Location.getForegroundPermissionsAsync();
       setLocationPermission(foregroundStatus === 'granted');
-
       if (foregroundStatus === 'granted') {
         updateLocation();
       }
-    } catch (error: any) {
-      // Handle Expo Go limitation - location permissions not available
-      if (error?.message?.includes('NSLocation') || error?.message?.includes('Info.plist')) {
-        setLocationPermission(false);
-      } else {
-        console.error('Error checking permissions:', error);
-      }
+    } catch (error) {
+      console.error('Error checking permissions:', error);
+      setLocationPermission(false);
     }
   };
 
@@ -121,23 +113,18 @@ export default function HomeScreen() {
       setLocationPermission(granted);
       if (granted) {
         updateLocation();
-        await setupLocation();
       }
-    } catch (error: any) {
-      // Handle Expo Go limitation
-      if (error?.message?.includes('NSLocation') || error?.message?.includes('Info.plist')) {
-        Alert.alert(
-          'Limitação do Expo Go',
-          'As permissões de localização não estão disponíveis no Expo Go. Para funcionalidade completa, use um development build.',
-          [{ text: 'OK' }]
-        );
-      } else {
-        console.error('Error requesting permissions:', error);
-      }
+    } catch (error) {
+      console.error('Error requesting permissions:', error);
     }
   };
 
   const updateLocation = async () => {
+    if (isScreenshotSeedEnabled) {
+      setCurrentLocation(screenshotSeedService.getCurrentLocation());
+      return;
+    }
+
     const location = await getCurrentLocation();
     if (location) {
       setCurrentLocation({
@@ -149,14 +136,14 @@ export default function HomeScreen() {
   };
 
   const loadData = async () => {
-    // Don't load if not authenticated
-    if (!isAuthenticated) {
+    if (!isAuthenticated || isEnterpriseOwner) {
       setLoading(false);
       return;
     }
 
     try {
       setLoading(true);
+      await ensureBackendReady();
       const [statusData, workplaceData] = await Promise.all([
         timesheetService.getTodayStatus(),
         workplaceService.getActive(),
@@ -164,7 +151,7 @@ export default function HomeScreen() {
       setTodayStatus(statusData ?? null);
       setWorkplace(statusData?.workplace ?? workplaceData ?? null);
       await updateLocation();
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error loading data:', error);
     } finally {
       setLoading(false);
@@ -173,45 +160,11 @@ export default function HomeScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadData();
+    if (!isEnterpriseOwner) {
+      await loadData();
+    }
     await refreshUser();
     setRefreshing(false);
-  };
-
-  const handleManualPunch = async (punchType: 'IN' | 'OUT') => {
-    if (!currentLocation) {
-      Alert.alert('Erro', 'Não foi possível obter a sua localização. Por favor, ative a localização.');
-      return;
-    }
-
-    // Warn about outside geofence but allow punch
-    const withinGeofence = distance !== undefined && workplace && distance <= workplace.radiusMeters;
-    
-    if (!withinGeofence && workplace) {
-      Alert.alert(
-        'Fora do Local de Trabalho',
-        `Está a ${Math.round(distance || 0)}m do local (máximo ${workplace.radiusMeters}m). O registo será marcado como "fora do local". Deseja continuar?`,
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Continuar', onPress: () => executePunch(punchType) },
-        ]
-      );
-      return;
-    }
-
-    if (currentLocation.accuracy > 50) {
-      Alert.alert(
-        'Precisão GPS baixa',
-        `A precisão atual é de ${Math.round(currentLocation.accuracy)}m. O registo pode ser impreciso. Deseja continuar?`,
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Continuar', onPress: () => executePunch(punchType) },
-        ]
-      );
-      return;
-    }
-
-    executePunch(punchType);
   };
 
   const executePunch = async (punchType: 'IN' | 'OUT') => {
@@ -227,11 +180,35 @@ export default function HomeScreen() {
       Alert.alert('Sucesso', punchType === 'IN' ? 'Entrada registada' : 'Saída registada');
       await loadData();
     } catch (error: any) {
-      const message = error.response?.data?.detail || 'Erro ao registar';
-      Alert.alert('Erro', message);
+      Alert.alert('Erro', getHumanReadableError(error, {
+        defaultMessage: 'Erro ao registar',
+        service: 'backend',
+      }));
     } finally {
       setActionLoading(null);
     }
+  };
+
+  const handleManualPunch = async (punchType: 'IN' | 'OUT') => {
+    if (!currentLocation) {
+      Alert.alert('Erro', 'Não foi possível obter a sua localização.');
+      return;
+    }
+
+    const withinGeofence = distance !== undefined && workplace && distance <= workplace.radiusMeters;
+    if (!withinGeofence && workplace) {
+      Alert.alert(
+        'Fora do Local de Trabalho',
+        `Está a ${Math.round(distance || 0)}m do local. Deseja continuar?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Continuar', onPress: () => executePunch(punchType) },
+        ],
+      );
+      return;
+    }
+
+    executePunch(punchType);
   };
 
   const handleBreak = async (breakType: 'BREAK_START' | 'BREAK_END') => {
@@ -252,169 +229,39 @@ export default function HomeScreen() {
       Alert.alert('Sucesso', breakType === 'BREAK_START' ? 'Pausa iniciada' : 'Pausa terminada');
       await loadData();
     } catch (error: any) {
-      const message = error.response?.data?.detail || 'Erro ao registar';
-      Alert.alert('Erro', message);
+      Alert.alert('Erro', getHumanReadableError(error, {
+        defaultMessage: 'Erro ao registar',
+        service: 'backend',
+      }));
     } finally {
       setActionLoading(null);
     }
   };
 
-  const renderPermissionDiagnostics = () => {
-    if (locationPermission) return null;
-    
-    return (
-      <View style={styles.diagnosticsCard}>
-        <View style={styles.diagnosticsHeader}>
-          <Ionicons name="settings-outline" size={24} color="#1a73e8" />
-          <Text style={styles.diagnosticsTitle}>Diagnóstico de Permissões</Text>
-        </View>
-        
-        <View style={styles.permissionRow}>
-          <Ionicons 
-            name={locationPermission ? "checkmark-circle" : "close-circle"} 
-            size={20} 
-            color={locationPermission ? "#28a745" : "#dc3545"} 
-          />
-          <Text style={styles.permissionText}>
-            Localização em primeiro plano: {locationPermission ? "Ativa" : "Inativa"}
-          </Text>
-        </View>
-        
-        {!locationPermission && (
-          <Button
-            title="Ativar Localização"
-            onPress={requestPermissions}
-            size="small"
-            style={{ marginTop: 12 }}
-          />
-        )}
-
-        <Text style={styles.permissionHint}>
-          Esta versão Android usa localização apenas enquanto a app está em uso.
-        </Text>
-      </View>
-    );
-  };
-
-  const renderWorkdayWarning = () => {
-    if (isWorkday || !workplace) return null;
-    
-    return (
-      <View style={[styles.warningBox, { backgroundColor: '#fff3cd', marginBottom: 16 }]}>
-        <Ionicons name="information-circle" size={20} color="#856404" />
-        <Text style={[styles.warningText, { color: '#856404' }]}>
-          Hoje não é um dia de trabalho configurado para &ldquo;{workplace.name}&rdquo;
-        </Text>
-      </View>
-    );
-  };
-
-  const renderPunchButtons = () => {
-    if (!todayStatus) return null;
-
-    const { punchIn, punchOut, breaks } = todayStatus;
-    const withinGeofence = distance !== undefined && workplace && distance <= workplace.radiusMeters;
-    const hasOpenBreak = breaks?.some(b => b.endedAt === null);
-
-    return (
-      <View style={styles.buttonsContainer}>
-        {/* Clock In Button */}
-        {!punchIn && (
-          <Button
-            title="Registar Entrada"
-            onPress={() => handleManualPunch('IN')}
-            loading={actionLoading === 'IN'}
-            disabled={!locationPermission}
-            variant="success"
-            style={styles.actionButton}
-          />
-        )}
-
-        {/* Clock Out Button */}
-        {punchIn && !punchOut && (
-          <Button
-            title="Registar Saída"
-            onPress={() => handleManualPunch('OUT')}
-            loading={actionLoading === 'OUT'}
-            disabled={!locationPermission || hasOpenBreak}
-            variant="danger"
-            style={styles.actionButton}
-          />
-        )}
-
-        {/* Break Buttons */}
-        {punchIn && !punchOut && !hasOpenBreak && (
-          <Button
-            title="Iniciar Pausa"
-            onPress={() => handleBreak('BREAK_START')}
-            loading={actionLoading === 'BREAK_START'}
-            disabled={!locationPermission}
-            variant="secondary"
-            style={styles.actionButton}
-          />
-        )}
-
-        {punchIn && !punchOut && hasOpenBreak && (
-          <Button
-            title="Terminar Pausa"
-            onPress={() => handleBreak('BREAK_END')}
-            loading={actionLoading === 'BREAK_END'}
-            disabled={!locationPermission}
-            variant="secondary"
-            style={styles.actionButton}
-          />
-        )}
-
-        {/* Location warnings */}
-        {!withinGeofence && workplace && locationPermission && (
-          <View style={styles.warningBox}>
-            <Ionicons name="warning" size={20} color="#ffc107" />
-            <Text style={styles.warningText}>
-              Está fora da área do local de trabalho ({Math.round(distance || 0)}m de distância, máximo {workplace.radiusMeters}m)
-            </Text>
-          </View>
-        )}
-        
-        {currentLocation && currentLocation.accuracy > 30 && (
-          <View style={[styles.warningBox, { backgroundColor: '#e3f2fd' }]}>
-            <Ionicons name="locate" size={20} color="#1a73e8" />
-            <Text style={[styles.warningText, { color: '#1a73e8' }]}>
-              Precisão GPS: {Math.round(currentLocation.accuracy)}m
-            </Text>
-          </View>
-        )}
-      </View>
-    );
-  };
-
-  // Loading state
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.noWorkplaceContainer}>
-          <ActivityIndicator size="large" color="#1a73e8" />
-          <Text style={{ marginTop: 16, color: '#666', fontSize: 14 }}>A carregar...</Text>
-        </View>
+      <SafeAreaView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#1a73e8" />
       </SafeAreaView>
     );
   }
 
-  // No active workplace - prompt to configure
-  if (!workplace && !loading) {
+  if (isEnterpriseOwner) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.noWorkplaceContainer}>
-          <Ionicons name="business-outline" size={64} color="#ccc" />
-          <Text style={styles.noWorkplaceTitle}>Sem Local de Trabalho</Text>
-          <Text style={styles.noWorkplaceText}>
-            Configure um local de trabalho para começar a registar ponto.
-          </Text>
-          <Button
-            title="Configurar Local"
-            onPress={() => router.push('/(tabs)/workplaces')}
-            style={{ marginTop: 20 }}
-          />
-        </View>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#1a73e8']} />}
+        >
+          <View style={styles.enterpriseHero}>
+            <Ionicons name="business" size={36} color="#1a73e8" />
+            <Text style={styles.enterpriseTitle}>{user?.enterpriseName || 'Conta empresa'}</Text>
+            <Text style={styles.enterpriseSubtitle}>
+              Use esta conta para gerir funcionários, convites e locais de trabalho.
+            </Text>
+            <Button title="Abrir Gestão da Empresa" onPress={() => router.push('/(tabs)/admin')} style={{ marginTop: 16 }} />
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -422,310 +269,101 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
-        style={styles.scrollView}
         contentContainerStyle={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#1a73e8']} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#1a73e8']} />}
       >
-        <View style={styles.header}>
-          <Text style={styles.greeting}>Olá, {user?.name?.split(' ')[0]}!</Text>
-          <Text style={styles.date}>
-            {new Date().toLocaleDateString('pt-PT', {
-              weekday: 'long',
-              day: 'numeric',
-              month: 'long',
-            })}
-          </Text>
-        </View>
-
-        {renderPermissionDiagnostics()}
-        {renderWorkdayWarning()}
-
-        {/* Active workplace card */}
-        {workplace && (
-          <TouchableOpacity 
-            style={styles.workplaceCard}
-            onPress={() => router.push('/(tabs)/workplaces')}
-          >
-            <View style={styles.workplaceCardContent}>
-              <View style={styles.workplaceIcon}>
-                <Ionicons name="business" size={24} color="#1a73e8" />
-              </View>
-              <View style={styles.workplaceInfo}>
-                <Text style={styles.workplaceLabel}>Local Ativo</Text>
-                <Text style={styles.workplaceName}>{workplace.name}</Text>
-                {workplace.schedule && (
-                  <Text style={styles.workplaceSchedule}>
-                    {workplace.schedule.startTime} - {workplace.schedule.endTime}
-                  </Text>
-                )}
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="#999" />
-            </View>
-          </TouchableOpacity>
-        )}
-
-        {todayStatus && (
-          <StatusCard
-            status={todayStatus.status}
-            workplaceName={workplace?.name}
-            distance={distance}
-            clockIn={todayStatus.punchIn?.occurredAt}
-            clockOut={todayStatus.punchOut?.occurredAt}
-            netWorkedFormatted={todayStatus.netWorkedFormatted}
-          />
-        )}
-
-        {todayStatus && (
-          <View style={styles.detailsCard}>
-            <Text style={styles.detailsTitle}>Detalhes de Hoje</Text>
-            
-            <View style={styles.detailRow}>
-              <Ionicons name="log-in" size={20} color="#28a745" />
-              <Text style={styles.detailLabel}>Entrada:</Text>
-              <Text style={styles.detailValue}>
-                {todayStatus.punchIn
-                  ? new Date(todayStatus.punchIn.occurredAt).toLocaleTimeString('pt-PT', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })
-                  : '--:--'}
-                {todayStatus.punchIn?.outsideWorkplace && (
-                  <Text style={styles.outsideTag}> (fora do local)</Text>
-                )}
-              </Text>
-            </View>
-
-            <View style={styles.detailRow}>
-              <Ionicons name="time" size={20} color="#ffc107" />
-              <Text style={styles.detailLabel}>Pausas:</Text>
-              <Text style={styles.detailValue}>
-                {todayStatus.breakMinutes > 0 
-                  ? `${Math.floor(todayStatus.breakMinutes / 60)}h ${todayStatus.breakMinutes % 60}min`
-                  : '--:--'}
-              </Text>
-            </View>
-
-            <View style={styles.detailRow}>
-              <Ionicons name="log-out" size={20} color="#dc3545" />
-              <Text style={styles.detailLabel}>Saída:</Text>
-              <Text style={styles.detailValue}>
-                {todayStatus.punchOut
-                  ? new Date(todayStatus.punchOut.occurredAt).toLocaleTimeString('pt-PT', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })
-                  : '--:--'}
-                {todayStatus.punchOut?.outsideWorkplace && (
-                  <Text style={styles.outsideTag}> (fora do local)</Text>
-                )}
-              </Text>
-            </View>
-
-            <View style={[styles.detailRow, { borderBottomWidth: 0 }]}>
-              <Ionicons name="hourglass" size={20} color="#1a73e8" />
-              <Text style={styles.detailLabel}>Total:</Text>
-              <Text style={[styles.detailValue, { fontWeight: '700', color: '#1a73e8' }]}>
-                {todayStatus.netWorkedFormatted}
-              </Text>
-            </View>
+        {!locationPermission && (
+          <View style={styles.permissionCard}>
+            <Text style={styles.permissionTitle}>Localização desativada</Text>
+            <Text style={styles.permissionText}>
+              Ative a localização para registar pontos com georreferência.
+            </Text>
+            <Button title="Ativar Localização" onPress={requestPermissions} size="small" />
           </View>
         )}
 
-        {renderPunchButtons()}
+        {todayStatus && workplace && (
+          <StatusCard
+            status={todayStatus.status}
+            clockIn={todayStatus.punchIn?.occurredAt}
+            clockOut={todayStatus.punchOut?.occurredAt}
+            netWorkedFormatted={todayStatus.netWorkedFormatted}
+            workplaceName={workplace.name}
+            distance={distance}
+          />
+        )}
+
+        <View style={styles.actionsCard}>
+          <Text style={styles.actionsTitle}>Ações rápidas</Text>
+          <View style={styles.actionsRow}>
+            <Button
+              title="Entrada"
+              onPress={() => handleManualPunch('IN')}
+              loading={actionLoading === 'IN'}
+              style={styles.actionButton}
+            />
+            <Button
+              title="Saída"
+              onPress={() => handleManualPunch('OUT')}
+              loading={actionLoading === 'OUT'}
+              variant="danger"
+              style={styles.actionButton}
+            />
+          </View>
+          <View style={styles.actionsRow}>
+            <Button
+              title="Iniciar Pausa"
+              onPress={() => handleBreak('BREAK_START')}
+              loading={actionLoading === 'BREAK_START'}
+              variant="secondary"
+              style={styles.actionButton}
+            />
+            <Button
+              title="Terminar Pausa"
+              onPress={() => handleBreak('BREAK_END')}
+              loading={actionLoading === 'BREAK_END'}
+              variant="success"
+              style={styles.actionButton}
+            />
+          </View>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  content: {
-    padding: 16,
-    paddingBottom: 32,
-  },
-  header: {
-    marginBottom: 20,
-  },
-  greeting: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#333',
-  },
-  date: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 4,
-    textTransform: 'capitalize',
-  },
-  diagnosticsCard: {
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f5f5f5' },
+  content: { padding: 16 },
+  enterpriseHero: {
     backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#1a73e8',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
     elevation: 3,
   },
-  diagnosticsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  diagnosticsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginLeft: 8,
-  },
-  permissionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-  },
-  permissionText: {
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 8,
-  },
-  permissionHint: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 8,
-    fontStyle: 'italic',
-  },
-  workplaceCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  workplaceCardContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-  },
-  workplaceIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#e3f2fd',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  workplaceInfo: {
-    flex: 1,
-  },
-  workplaceLabel: {
-    fontSize: 12,
-    color: '#999',
-    textTransform: 'uppercase',
-    fontWeight: '600',
-  },
-  workplaceName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginTop: 2,
-  },
-  workplaceSchedule: {
-    fontSize: 13,
-    color: '#666',
-    marginTop: 2,
-  },
-  detailsCard: {
+  enterpriseTitle: { fontSize: 24, fontWeight: '700', color: '#111827', marginTop: 12 },
+  enterpriseSubtitle: { fontSize: 14, color: '#6b7280', textAlign: 'center', marginTop: 8 },
+  permissionCard: { backgroundColor: '#fff7ed', borderRadius: 12, padding: 16, marginBottom: 16 },
+  permissionTitle: { fontSize: 16, fontWeight: '700', color: '#9a3412', marginBottom: 6 },
+  permissionText: { fontSize: 14, color: '#9a3412', marginBottom: 12 },
+  actionsCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
     marginTop: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
     elevation: 3,
   },
-  detailsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 12,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  detailLabel: {
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 10,
-    width: 70,
-  },
-  detailValue: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
-    flex: 1,
-  },
-  outsideTag: {
-    fontSize: 12,
-    color: '#dc3545',
-    fontStyle: 'italic',
-  },
-  buttonsContainer: {
-    marginTop: 20,
-  },
-  actionButton: {
-    marginBottom: 12,
-  },
-  warningBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff3cd',
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 8,
-  },
-  warningText: {
-    color: '#856404',
-    marginLeft: 8,
-    flex: 1,
-    fontSize: 13,
-  },
-  noWorkplaceContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-  },
-  noWorkplaceTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#333',
-    marginTop: 16,
-  },
-  noWorkplaceText: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    marginTop: 8,
-  },
+  actionsTitle: { fontSize: 18, fontWeight: '700', color: '#111827', marginBottom: 12 },
+  actionsRow: { flexDirection: 'row', gap: 12, marginBottom: 12 },
+  actionButton: { flex: 1 },
 });

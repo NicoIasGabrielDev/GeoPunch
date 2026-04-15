@@ -68,6 +68,12 @@ react {
  */
 def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBuilds') ?: false).toBoolean()
 def googleMapsApiKey = System.getenv("EXPO_PUBLIC_GOOGLE_MAPS_API_KEY") ?: (findProperty("EXPO_PUBLIC_GOOGLE_MAPS_API_KEY") ?: "")
+def releaseStoreFile = System.getenv("ANDROID_UPLOAD_STORE_FILE") ?: (findProperty("ANDROID_UPLOAD_STORE_FILE") ?: "")
+def releaseStorePassword = System.getenv("ANDROID_UPLOAD_STORE_PASSWORD") ?: (findProperty("ANDROID_UPLOAD_STORE_PASSWORD") ?: "")
+def releaseKeyAlias = System.getenv("ANDROID_UPLOAD_KEY_ALIAS") ?: (findProperty("ANDROID_UPLOAD_KEY_ALIAS") ?: "")
+def releaseKeyPassword = System.getenv("ANDROID_UPLOAD_KEY_PASSWORD") ?: (findProperty("ANDROID_UPLOAD_KEY_PASSWORD") ?: "")
+def hasCustomReleaseSigning =
+        releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -106,15 +112,23 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            if (hasCustomReleaseSigning) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            if (hasCustomReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds

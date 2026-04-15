@@ -254,11 +254,13 @@ async def get_current_user(
         email = payload.get("email")
         if email:
             logger.info("Creating missing profile for authenticated user %s", user_id)
+            account_type = payload.get("user_metadata", {}).get("account_type", "personal")
             profile_data = {
                 "id": user_id,
                 "email": email,
                 "name": payload.get("user_metadata", {}).get("name", email.split("@")[0]),
-                "role": "employee"
+                "role": "enterprise_owner" if account_type == "enterprise" else "personal_user",
+                "account_type": account_type,
             }
             await db.create_profile(profile_data)
             profile = await db.find_profile_by_id(user_id)
