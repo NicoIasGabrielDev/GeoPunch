@@ -122,18 +122,11 @@ class Database:
         try:
             payload = dict(update_data)
             payload["updated_at"] = datetime.utcnow().isoformat()
-            response = (
-                self._table("enterprise_memberships")
-                .update(payload)
-                .eq("id", membership_id)
-                .select("*")
-                .execute()
-            )
-            if response.data:
-                return response.data[0]
+            self._table("enterprise_memberships").update(payload).eq("id", membership_id).execute()
 
-            # Some Supabase/PostgREST combinations can apply the update
-            # successfully but still return an empty representation.
+            # Fetch the updated row in a second query for compatibility
+            # with supabase-py versions that don't support chaining
+            # `.select()` after `.update()`.
             return await self.find_enterprise_membership_by_id(membership_id)
         except Exception as exc:
             logger.error("Error updating enterprise membership %s: %s", membership_id, exc)
@@ -335,8 +328,8 @@ class Database:
         try:
             payload = dict(update_data)
             payload["updated_at"] = datetime.utcnow().isoformat()
-            response = self._table("workplaces").update(payload).eq("id", workplace_id).select("*").execute()
-            return response.data[0] if response.data else None
+            self._table("workplaces").update(payload).eq("id", workplace_id).execute()
+            return await self.find_workplace_by_id(workplace_id)
         except Exception as exc:
             logger.error("Error updating workplace %s: %s", workplace_id, exc)
             return None
