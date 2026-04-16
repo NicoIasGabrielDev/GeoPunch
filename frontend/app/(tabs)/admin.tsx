@@ -42,8 +42,17 @@ export default function AdminScreen() {
         enterpriseService.listMemberships(),
         workplaceService.list(),
       ]);
-      setMemberships(membershipData ?? []);
-      setWorkplaces((workplaceData ?? []).filter((item: Workplace) => item.contextType === 'enterprise'));
+      const nextMemberships = membershipData ?? [];
+      const nextWorkplaces = (workplaceData ?? []).filter(
+        (item: Workplace) => item.contextType === 'enterprise',
+      );
+
+      setMemberships(nextMemberships);
+      setWorkplaces(nextWorkplaces);
+      setSelectedMember((current) => {
+        if (!current) return null;
+        return nextMemberships.find((item) => item.id === current.id) ?? current;
+      });
     } catch (error) {
       console.error('Error loading enterprise data:', error);
       Alert.alert('Erro', getHumanReadableError(error, {
@@ -118,6 +127,7 @@ export default function AdminScreen() {
     try {
       await enterpriseService.assignWorkplace(selectedMember.userId, workplaceId);
       await loadData();
+      Alert.alert('Sucesso', 'Local atribuído ao funcionário.');
     } catch (error) {
       Alert.alert('Erro', getHumanReadableError(error, {
         defaultMessage: 'Não foi possível atribuir o local.',

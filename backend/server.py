@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 import csv
 import io
 import logging
@@ -227,8 +227,12 @@ def format_minutes(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def get_today_date() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%d")
+    return utc_now().strftime("%Y-%m-%d")
 
 
 def is_workday(workdays: Dict[str, bool], date: datetime) -> bool:
@@ -248,8 +252,16 @@ def generate_maps_link(lat: float, lng: float) -> str:
     return f"https://maps.google.com/?q={lat},{lng}"
 
 
-def parse_db_datetime(value: Optional[str]) -> Optional[datetime]:
-    return datetime.fromisoformat(value) if value else None
+def parse_db_datetime(value: Optional[Any]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    return None
 
 
 def require_enterprise_owner(user: Dict[str, Any]) -> None:
@@ -278,9 +290,9 @@ def normalize_workplace_response(
         workdays=workplace.get("workdays", {}),
         schedule=workplace.get("schedule"),
         locationLocked=workplace.get("location_locked", True),
-        configuredAt=parse_db_datetime(workplace.get("configured_at") or workplace.get("created_at")) or datetime.utcnow(),
+        configuredAt=parse_db_datetime(workplace.get("configured_at") or workplace.get("created_at")) or utc_now(),
         isActive=workplace["id"] == active_workplace_id if active_workplace_id else False,
-        createdAt=parse_db_datetime(workplace["created_at"]) or datetime.utcnow(),
+        createdAt=parse_db_datetime(workplace["created_at"]) or utc_now(),
         contextType="enterprise" if workplace.get("enterprise_id") else "personal",
         enterpriseId=workplace.get("enterprise_id"),
         assignmentId=assignment.get("id") if assignment else None,
@@ -344,7 +356,7 @@ def group_punches_by_day(punches_data: List[Dict[str, Any]]) -> Dict[str, Dict[s
                 "anomalies": [],
             }
 
-        occurred_at = parse_db_datetime(punch["occurred_at"]) or datetime.utcnow()
+        occurred_at = parse_db_datetime(punch["occurred_at"]) or utc_now()
         days[date_key]["punches"].append(
             {
                 "id": punch["id"],
@@ -404,14 +416,14 @@ def build_timesheet_rows(
                 status = "working"
 
         if punch_in:
-            finish_time = punch_out or datetime.utcnow()
+            finish_time = punch_out or utc_now()
             gross_minutes = int((finish_time - punch_in).total_seconds() / 60)
 
         for start, end in break_pairs:
             break_minutes += int((end - start).total_seconds() / 60)
 
         if current_break_start:
-            break_minutes += int((datetime.utcnow() - current_break_start).total_seconds() / 60)
+            break_minutes += int((utc_now() - current_break_start).total_seconds() / 60)
 
         net_minutes = max(0, gross_minutes - break_minutes)
 
@@ -452,7 +464,7 @@ async def build_user_timesheet(
 
 async def build_today_status(user: Dict[str, Any]) -> Dict[str, Any]:
     today = get_today_date()
-    today_date = datetime.utcnow()
+    today_date = utc_now()
     workplace = None
 
     active_workplace_id = user.get("active_workplace_id")
@@ -466,7 +478,7 @@ async def build_today_status(user: Dict[str, Any]) -> Dict[str, Any]:
     punches = []
     for punch in punches_data:
         punch_copy = punch.copy()
-        punch_copy["occurredAt"] = parse_db_datetime(punch["occurred_at"]) or datetime.utcnow()
+        punch_copy["occurredAt"] = parse_db_datetime(punch["occurred_at"]) or utc_now()
         punches.append(punch_copy)
     punches.sort(key=lambda item: item["occurredAt"])
 
@@ -492,14 +504,14 @@ async def build_today_status(user: Dict[str, Any]) -> Dict[str, Any]:
     status = "not_started"
 
     if punch_data["in"]:
-        finish_time = punch_data["out"]["occurredAt"] if punch_data["out"] else datetime.utcnow()
+        finish_time = punch_data["out"]["occurredAt"] if punch_data["out"] else utc_now()
         gross_minutes = int((finish_time - punch_data["in"]["occurredAt"]).total_seconds() / 60)
         status = "finished" if punch_data["out"] else "working"
         if current_break_start:
             status = "on_break"
 
     for break_item in punch_data["breaks"]:
-        end_time = break_item["end"]["occurredAt"] if break_item["end"] else datetime.utcnow()
+        end_time = break_item["end"]["occurredAt"] if break_item["end"] else utc_now()
         break_minutes += int((end_time - break_item["start"]["occurredAt"]).total_seconds() / 60)
 
     net_minutes = max(0, gross_minutes - break_minutes)
@@ -533,7 +545,7 @@ async def build_today_status(user: Dict[str, Any]) -> Dict[str, Any]:
                 "startedAt": item["start"]["occurredAt"],
                 "endedAt": item["end"]["occurredAt"] if item["end"] else None,
                 "durationMinutes": int(
-                    (((item["end"]["occurredAt"] if item["end"] else datetime.utcnow()) - item["start"]["occurredAt"]).total_seconds()) / 60
+                    (((item["end"]["occurredAt"] if item["end"] else utc_now()) - item["start"]["occurredAt"]).total_seconds()) / 60
                 ),
             }
             for item in punch_data["breaks"]
@@ -565,7 +577,7 @@ async def build_membership_response(
         invitedBy=membership["invited_by"],
         acceptedAt=parse_db_datetime(membership.get("accepted_at")),
         respondedAt=parse_db_datetime(membership.get("responded_at")),
-        createdAt=parse_db_datetime(membership["created_at"]) or datetime.utcnow(),
+        createdAt=parse_db_datetime(membership["created_at"]) or utc_now(),
         assignedWorkplaceIds=assignments_by_user_id.get(membership.get("user_id") or "", []),
     )
 
@@ -583,7 +595,7 @@ async def get_me(user=Depends(get_current_user)):
         enterpriseId=user.get("enterprise_id"),
         enterpriseName=enterprise.get("name") if enterprise else None,
         activeWorkplaceId=user.get("active_workplace_id"),
-        createdAt=parse_db_datetime(user["created_at"]) or datetime.utcnow(),
+        createdAt=parse_db_datetime(user["created_at"]) or utc_now(),
     )
 
 
@@ -600,7 +612,7 @@ async def bootstrap_enterprise(payload: EnterpriseBootstrapRequest, user=Depends
             name=existing["name"],
             nif=existing.get("nif"),
             ownerUserId=existing["owner_user_id"],
-            createdAt=parse_db_datetime(existing["created_at"]) or datetime.utcnow(),
+            createdAt=parse_db_datetime(existing["created_at"]) or utc_now(),
         )
 
     created = await db.create_enterprise(
@@ -608,7 +620,7 @@ async def bootstrap_enterprise(payload: EnterpriseBootstrapRequest, user=Depends
             "owner_user_id": user["id"],
             "name": payload.name,
             "nif": payload.nif,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": utc_now().isoformat(),
         }
     )
     if not created:
@@ -621,7 +633,7 @@ async def bootstrap_enterprise(payload: EnterpriseBootstrapRequest, user=Depends
         name=created["name"],
         nif=created.get("nif"),
         ownerUserId=created["owner_user_id"],
-        createdAt=parse_db_datetime(created["created_at"]) or datetime.utcnow(),
+        createdAt=parse_db_datetime(created["created_at"]) or utc_now(),
     )
 
 
@@ -635,7 +647,7 @@ async def get_current_enterprise(user=Depends(get_current_user)):
         name=enterprise["name"],
         nif=enterprise.get("nif"),
         ownerUserId=enterprise["owner_user_id"],
-        createdAt=parse_db_datetime(enterprise["created_at"]) or datetime.utcnow(),
+        createdAt=parse_db_datetime(enterprise["created_at"]) or utc_now(),
     )
 
 
@@ -665,7 +677,7 @@ async def create_enterprise_invitation(payload: EnterpriseInvitationCreate, user
             "email": target_email,
             "invited_by": user["id"],
             "status": "pending",
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": utc_now().isoformat(),
         }
     )
     if not created:
@@ -717,7 +729,7 @@ async def accept_membership(membership_id: str, user=Depends(get_current_user)):
     if user.get("enterprise_id") and user.get("enterprise_id") != membership["enterprise_id"]:
         raise HTTPException(status_code=400, detail="Já está associado a outra empresa")
 
-    now_iso = datetime.utcnow().isoformat()
+    now_iso = utc_now().isoformat()
     updated = await db.update_enterprise_membership(
         membership_id,
         {
@@ -756,7 +768,7 @@ async def reject_membership(membership_id: str, user=Depends(get_current_user)):
         {
             "user_id": user["id"],
             "status": "rejected",
-            "responded_at": datetime.utcnow().isoformat(),
+            "responded_at": utc_now().isoformat(),
         },
     )
     if not updated:
@@ -772,7 +784,7 @@ async def remove_membership(membership_id: str, user=Depends(get_current_user)):
     if not membership or membership["enterprise_id"] != user.get("enterprise_id"):
         raise HTTPException(status_code=404, detail="Associação não encontrada")
 
-    now_iso = datetime.utcnow().isoformat()
+    now_iso = utc_now().isoformat()
     updated = await db.update_enterprise_membership(
         membership_id,
         {
@@ -819,7 +831,7 @@ async def assign_enterprise_workplace(payload: AssignEnterpriseWorkplaceRequest,
             employeeUserId=existing["employee_user_id"],
             workplaceId=existing["workplace_id"],
             assignedBy=existing["assigned_by"],
-            createdAt=parse_db_datetime(existing["created_at"]) or datetime.utcnow(),
+            createdAt=parse_db_datetime(existing["created_at"]) or utc_now(),
         )
 
     created = await db.create_employee_workplace_assignment(
@@ -828,7 +840,7 @@ async def assign_enterprise_workplace(payload: AssignEnterpriseWorkplaceRequest,
             "employee_user_id": payload.employeeUserId,
             "workplace_id": workplace["id"],
             "assigned_by": user["id"],
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": utc_now().isoformat(),
         }
     )
     if not created:
@@ -840,7 +852,7 @@ async def assign_enterprise_workplace(payload: AssignEnterpriseWorkplaceRequest,
         employeeUserId=created["employee_user_id"],
         workplaceId=created["workplace_id"],
         assignedBy=created["assigned_by"],
-        createdAt=parse_db_datetime(created["created_at"]) or datetime.utcnow(),
+        createdAt=parse_db_datetime(created["created_at"]) or utc_now(),
     )
 
 
@@ -884,9 +896,9 @@ async def get_enterprise_employee_timesheet(
     accepted_date_str = accepted_at.strftime("%Y-%m-%d") if accepted_at else None
 
     if not from_date:
-        from_date = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d")
+        from_date = (utc_now() - timedelta(days=30)).strftime("%Y-%m-%d")
     if not to_date:
-        to_date = datetime.utcnow().strftime("%Y-%m-%d")
+        to_date = utc_now().strftime("%Y-%m-%d")
     if accepted_date_str and from_date < accepted_date_str:
         from_date = accepted_date_str
 
@@ -924,7 +936,7 @@ async def create_workplace(workplace: WorkplaceCreate, user=Depends(get_current_
     if user.get("role") == "enterprise_owner" and not user.get("enterprise_id"):
         raise HTTPException(status_code=400, detail="Conta empresa ainda não foi configurada")
 
-    now_iso = datetime.utcnow().isoformat()
+    now_iso = utc_now().isoformat()
     workplace_doc = {
         "user_id": user["id"] if user.get("role") != "enterprise_owner" else None,
         "enterprise_id": user.get("enterprise_id") if user.get("role") == "enterprise_owner" else None,
@@ -1037,7 +1049,7 @@ async def create_punch(punch: PunchCreate, user=Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="Nenhum local de trabalho ativo. Configure um local primeiro.")
 
     workplace = await ensure_workplace_access(user, active_workplace_id)
-    server_time = datetime.utcnow()
+    server_time = utc_now()
     device_time = punch.deviceTime or server_time
     today = server_time.strftime("%Y-%m-%d")
 
@@ -1138,7 +1150,7 @@ async def create_geofence_event(event: GeofenceEventCreate, user=Depends(get_cur
             "longitude": event.longitude,
             "accuracy": event.accuracy,
             "device_time": event.deviceTime.isoformat() if event.deviceTime else None,
-            "received_at": datetime.utcnow().isoformat(),
+            "received_at": utc_now().isoformat(),
             "processed": False,
         }
     )
@@ -1170,9 +1182,9 @@ async def get_timesheet(
     require_worker_account(user)
 
     if not from_date:
-        from_date = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d")
+        from_date = (utc_now() - timedelta(days=30)).strftime("%Y-%m-%d")
     if not to_date:
-        to_date = datetime.utcnow().strftime("%Y-%m-%d")
+        to_date = utc_now().strftime("%Y-%m-%d")
 
     workplaces = await get_accessible_workplaces(user)
     return await build_user_timesheet(user["id"], workplaces, from_date, to_date)
@@ -1193,9 +1205,9 @@ async def export_csv(
     require_worker_account(user)
 
     if not from_date:
-        from_date = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d")
+        from_date = (utc_now() - timedelta(days=30)).strftime("%Y-%m-%d")
     if not to_date:
-        to_date = datetime.utcnow().strftime("%Y-%m-%d")
+        to_date = utc_now().strftime("%Y-%m-%d")
 
     workplaces = await get_accessible_workplaces(user)
     workplace_map = {item["id"]: item for item in workplaces}
@@ -1281,9 +1293,9 @@ async def export_xlsx(
     require_worker_account(user)
 
     if not from_date:
-        from_date = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d")
+        from_date = (utc_now() - timedelta(days=30)).strftime("%Y-%m-%d")
     if not to_date:
-        to_date = datetime.utcnow().strftime("%Y-%m-%d")
+        to_date = utc_now().strftime("%Y-%m-%d")
 
     workplaces = await get_accessible_workplaces(user)
     workplace_map = {item["id"]: item for item in workplaces}

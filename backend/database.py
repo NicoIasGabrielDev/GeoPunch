@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -11,6 +11,10 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 logger = logging.getLogger(__name__)
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
@@ -62,7 +66,7 @@ class Database:
     async def update_profile(self, user_id: str, update_data: Dict[str, Any]) -> bool:
         try:
             payload = dict(update_data)
-            payload["updated_at"] = datetime.utcnow().isoformat()
+            payload["updated_at"] = utc_now().isoformat()
             self._table("profiles").update(payload).eq("id", user_id).execute()
             return True
         except Exception as exc:
@@ -121,7 +125,7 @@ class Database:
     async def update_enterprise_membership(self, membership_id: str, update_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         try:
             payload = dict(update_data)
-            payload["updated_at"] = datetime.utcnow().isoformat()
+            payload["updated_at"] = utc_now().isoformat()
             self._table("enterprise_memberships").update(payload).eq("id", membership_id).execute()
 
             # Fetch the updated row in a second query for compatibility
@@ -327,7 +331,7 @@ class Database:
     async def update_workplace(self, workplace_id: str, update_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         try:
             payload = dict(update_data)
-            payload["updated_at"] = datetime.utcnow().isoformat()
+            payload["updated_at"] = utc_now().isoformat()
             self._table("workplaces").update(payload).eq("id", workplace_id).execute()
             return await self.find_workplace_by_id(workplace_id)
         except Exception as exc:
