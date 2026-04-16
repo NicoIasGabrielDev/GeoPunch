@@ -129,7 +129,12 @@ class Database:
                 .select("*")
                 .execute()
             )
-            return response.data[0] if response.data else None
+            if response.data:
+                return response.data[0]
+
+            # Some Supabase/PostgREST combinations can apply the update
+            # successfully but still return an empty representation.
+            return await self.find_enterprise_membership_by_id(membership_id)
         except Exception as exc:
             logger.error("Error updating enterprise membership %s: %s", membership_id, exc)
             return None

@@ -58,8 +58,17 @@ export default function ProfileScreen() {
       } else {
         await enterpriseService.rejectInvitation(membershipId);
       }
-      await refreshUser();
-      await loadInvitations();
+
+      setPendingInvitations((current) =>
+        current.filter((invitation) => invitation.id !== membershipId),
+      );
+
+      try {
+        await refreshUser();
+        await loadInvitations();
+      } catch (syncError) {
+        console.error('Invitation post-action sync failed:', syncError);
+      }
     } catch (error) {
       Alert.alert('Erro', getHumanReadableError(error, {
         defaultMessage: 'Não foi possível processar o convite.',
