@@ -13,6 +13,8 @@ interface InputProps {
   style?: ViewStyle;
   multiline?: boolean;
   editable?: boolean;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
 }
 
 export const Input: React.FC<InputProps> = ({
@@ -27,6 +29,8 @@ export const Input: React.FC<InputProps> = ({
   style,
   multiline = false,
   editable = true,
+  accessibilityLabel,
+  accessibilityHint,
 }) => {
   return (
     <View style={[styles.container, style]}>
@@ -47,6 +51,9 @@ export const Input: React.FC<InputProps> = ({
         autoCapitalize={autoCapitalize}
         multiline={multiline}
         editable={editable}
+        accessibilityLabel={accessibilityLabel ?? label ?? placeholder}
+        accessibilityHint={error ?? accessibilityHint}
+        accessibilityState={{ disabled: !editable }}
       />
       {error && <Text style={styles.error}>{error}</Text>}
     </View>

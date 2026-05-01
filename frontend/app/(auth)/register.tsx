@@ -228,7 +228,7 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   keyboardView: { flex: 1 },
-  scrollContent: { flexGrow: 1, padding: 24 },
+  scrollContent: { flexGrow: 1, padding: 24, paddingBottom: 36 },
   header: { alignItems: 'center', marginBottom: 24, marginTop: 20 },
   iconCircle: {
     width: 70,

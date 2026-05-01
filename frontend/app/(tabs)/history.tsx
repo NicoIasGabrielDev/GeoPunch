@@ -226,6 +226,7 @@ const styles = StyleSheet.create({
   listContent: {
     padding: 16,
     paddingTop: 8,
+    paddingBottom: 32,
   },
   card: {
     backgroundColor: '#fff',

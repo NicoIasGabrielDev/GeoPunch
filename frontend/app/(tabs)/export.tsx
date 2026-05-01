@@ -38,6 +38,11 @@ export default function ExportScreen() {
   const handleExport = async (format: 'csv' | 'xlsx') => {
     setLoading(format);
     try {
+      if (new Date(fromDate) > new Date(toDate)) {
+        Alert.alert('Período inválido', 'A data inicial não pode ser posterior à data final.');
+        return;
+      }
+
       await ensureBackendReady();
       const data = format === 'csv'
         ? await timesheetService.exportCsv(fromDate, toDate)
@@ -59,22 +64,30 @@ export default function ExportScreen() {
         // For mobile, save to file system and share
         const filename = `timesheet_${fromDate}_${toDate}.${format}`;
         const fileUri = `${FileSystem.documentDirectory}${filename}`;
-        
-        // Convert blob to base64
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-          const base64 = (reader.result as string).split(',')[1];
-          await FileSystem.writeAsStringAsync(fileUri, base64, {
-            encoding: FileSystem.EncodingType.Base64,
-          });
-          
-          if (await Sharing.isAvailableAsync()) {
-            await Sharing.shareAsync(fileUri);
-          } else {
-            Alert.alert('Erro', 'Partilha não disponível neste dispositivo');
-          }
-        };
-        reader.readAsDataURL(data);
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onerror = () => reject(new Error('Não foi possível preparar o ficheiro para exportação.'));
+          reader.onloadend = () => {
+            const result = typeof reader.result === 'string' ? reader.result : '';
+            const [, encoded] = result.split(',');
+            if (!encoded) {
+              reject(new Error('Ficheiro exportado sem conteúdo válido.'));
+              return;
+            }
+            resolve(encoded);
+          };
+          reader.readAsDataURL(data);
+        });
+
+        await FileSystem.writeAsStringAsync(fileUri, base64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(fileUri);
+        } else {
+          Alert.alert('Erro', 'Partilha não disponível neste dispositivo');
+        }
       }
     } catch (error: any) {
       console.error('Export error:', error);
@@ -261,6 +274,7 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 16,
+    paddingBottom: 32,
   },
   header: {
     alignItems: 'center',

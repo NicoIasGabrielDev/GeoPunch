@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { isAxiosError } from 'axios';
 
 type ErrorMessageOptions = {
   defaultMessage: string;
@@ -31,7 +31,7 @@ const includesPattern = (value: string, patterns: string[]) => {
 };
 
 export const isNetworkLikeError = (error: unknown): boolean => {
-  if (axios.isAxiosError(error)) {
+  if (isAxiosError(error)) {
     const code = error.code ?? '';
     const message = error.message ?? '';
     return (
@@ -64,7 +64,7 @@ export const getHumanReadableError = (
     return SUPABASE_NETWORK_MESSAGE;
   }
 
-  if (axios.isAxiosError(error)) {
+  if (isAxiosError(error)) {
     const detail = error.response?.data?.detail;
     if (typeof detail === 'string' && detail.trim()) {
       return detail;

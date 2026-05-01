@@ -29,7 +29,8 @@ export default function AdminScreen() {
   const [workplaces, setWorkplaces] = useState<Workplace[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [inviteSaving, setInviteSaving] = useState(false);
+  const [assigningWorkplaceId, setAssigningWorkplaceId] = useState<string | null>(null);
   const [selectedMember, setSelectedMember] = useState<EnterpriseMembership | null>(null);
   const [assignModalVisible, setAssignModalVisible] = useState(false);
   const [timesheetModalVisible, setTimesheetModalVisible] = useState(false);
@@ -79,7 +80,7 @@ export default function AdminScreen() {
 
   const handleInvite = async () => {
     if (!inviteEmail.trim()) return;
-    setSaving(true);
+    setInviteSaving(true);
     try {
       await enterpriseService.inviteByEmail(inviteEmail.trim().toLowerCase());
       setInviteEmail('');
@@ -91,7 +92,7 @@ export default function AdminScreen() {
         service: 'backend',
       }));
     } finally {
-      setSaving(false);
+      setInviteSaving(false);
     }
   };
 
@@ -123,7 +124,7 @@ export default function AdminScreen() {
 
   const handleAssignWorkplace = async (workplaceId: string) => {
     if (!selectedMember?.userId) return;
-    setSaving(true);
+    setAssigningWorkplaceId(workplaceId);
     try {
       await enterpriseService.assignWorkplace(selectedMember.userId, workplaceId);
       await loadData();
@@ -134,7 +135,7 @@ export default function AdminScreen() {
         service: 'backend',
       }));
     } finally {
-      setSaving(false);
+      setAssigningWorkplaceId(null);
     }
   };
 
@@ -189,7 +190,7 @@ export default function AdminScreen() {
             keyboardType="email-address"
             autoCapitalize="none"
           />
-          <Button title="Enviar Convite" onPress={handleInvite} loading={saving} />
+          <Button title="Enviar Convite" onPress={handleInvite} loading={inviteSaving} />
         </View>
 
         <View style={styles.card}>
@@ -219,8 +220,21 @@ export default function AdminScreen() {
                   Locais atribuídos: {membership.assignedWorkplaceIds.length}
                 </Text>
                 <View style={styles.memberActions}>
-                  <Button title="Atribuir Locais" onPress={() => openAssignModal(membership)} size="small" style={{ flex: 1 }} />
-                  <Button title="Ver Registos" onPress={() => openTimesheetModal(membership)} size="small" variant="outline" style={{ flex: 1 }} />
+                  <Button
+                    title="Atribuir Locais"
+                    onPress={() => openAssignModal(membership)}
+                    size="small"
+                    style={styles.memberActionButton}
+                    textStyle={styles.memberActionButtonText}
+                  />
+                  <Button
+                    title="Ver Registos"
+                    onPress={() => openTimesheetModal(membership)}
+                    size="small"
+                    variant="outline"
+                    style={styles.memberActionButton}
+                    textStyle={styles.memberActionButtonText}
+                  />
                 </View>
                 <Button
                   title="Remover"
@@ -244,9 +258,17 @@ export default function AdminScreen() {
             <Text style={styles.modalTitle}>Atribuir Locais</Text>
             <View style={{ width: 28 }} />
           </View>
-          <ScrollView contentContainerStyle={styles.modalContent}>
+          <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalSubtitle}>{selectedMember?.userName || selectedMember?.email}</Text>
-            {workplaces.map((workplace) => {
+            {workplaces.length === 0 ? (
+              <View style={styles.emptyModalState}>
+                <Ionicons name="business-outline" size={42} color="#9ca3af" />
+                <Text style={styles.emptyModalTitle}>Sem locais da empresa</Text>
+                <Text style={styles.emptyModalText}>
+                  Crie primeiro um local de trabalho para poder atribuí-lo a funcionários.
+                </Text>
+              </View>
+            ) : workplaces.map((workplace) => {
               const alreadyAssigned = !!selectedMember?.assignedWorkplaceIds.includes(workplace.id);
               return (
                 <View key={workplace.id} style={styles.workplaceAssignCard}>
@@ -257,8 +279,8 @@ export default function AdminScreen() {
                   <Button
                     title={alreadyAssigned ? 'Atribuído' : 'Atribuir'}
                     onPress={() => handleAssignWorkplace(workplace.id)}
-                    disabled={alreadyAssigned || saving}
-                    loading={saving && !alreadyAssigned}
+                    disabled={alreadyAssigned || assigningWorkplaceId !== null}
+                    loading={assigningWorkplaceId === workplace.id}
                     size="small"
                     variant={alreadyAssigned ? 'secondary' : 'primary'}
                   />
@@ -301,7 +323,7 @@ export default function AdminScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  content: { padding: 16 },
+  content: { padding: 16, paddingBottom: 32 },
   header: { marginBottom: 16 },
   title: { fontSize: 24, fontWeight: '700', color: '#111827' },
   subtitle: { fontSize: 14, color: '#6b7280', marginTop: 4 },
@@ -328,6 +350,8 @@ const styles = StyleSheet.create({
   memberName: { fontSize: 15, fontWeight: '700', color: '#111827' },
   memberMeta: { fontSize: 12, color: '#6b7280', marginTop: 4 },
   memberActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  memberActionButton: { flex: 1, paddingHorizontal: 10 },
+  memberActionButtonText: { fontSize: 13, textAlign: 'center' },
   noAccessContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   noAccessTitle: { fontSize: 22, fontWeight: '700', color: '#333', marginTop: 16 },
   noAccessText: { fontSize: 14, color: '#666', textAlign: 'center', marginTop: 8 },
@@ -343,8 +367,16 @@ const styles = StyleSheet.create({
     borderBottomColor: '#e5e7eb',
   },
   modalTitle: { fontSize: 17, fontWeight: '700', color: '#111827' },
-  modalContent: { padding: 16 },
+  modalContent: { padding: 16, paddingBottom: 32 },
   modalSubtitle: { fontSize: 14, color: '#6b7280', marginBottom: 16 },
+  emptyModalState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+    paddingHorizontal: 20,
+  },
+  emptyModalTitle: { fontSize: 16, fontWeight: '700', color: '#374151', marginTop: 12 },
+  emptyModalText: { fontSize: 13, color: '#6b7280', textAlign: 'center', lineHeight: 19, marginTop: 6 },
   workplaceAssignCard: {
     flexDirection: 'row',
     alignItems: 'center',

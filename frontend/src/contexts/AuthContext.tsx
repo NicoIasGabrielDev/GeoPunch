@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { Session } from '@supabase/supabase-js';
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
@@ -337,7 +338,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
         localStorage.removeItem(storageKey);
       } else {
-        await SecureStore.deleteItemAsync(storageKey);
+        await Promise.allSettled([
+          SecureStore.deleteItemAsync(storageKey),
+          AsyncStorage.removeItem(storageKey),
+        ]);
       }
     } catch (error) {
       console.error('Logout error (ignored):', error);

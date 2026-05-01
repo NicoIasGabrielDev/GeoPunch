@@ -15,6 +15,8 @@ if ((!process.env.EXPO_PUBLIC_SUPABASE_URL || !process.env.EXPO_PUBLIC_SUPABASE_
 const isWebWithLocalStorage = () =>
   Platform.OS === 'web' && typeof localStorage !== 'undefined';
 
+const getNativeStorage = () => SecureStore;
+
 // Custom storage adapter for Expo SecureStore
 const ExpoSecureStoreAdapter = {
   getItem: async (key: string) => {
@@ -22,7 +24,7 @@ const ExpoSecureStoreAdapter = {
       if (isWebWithLocalStorage()) {
         return localStorage.getItem(key);
       }
-      return await SecureStore.getItemAsync(key);
+      return await getNativeStorage().getItemAsync(key);
     } catch (error) {
       console.error('Error getting item from secure store:', error);
       return null;
@@ -33,7 +35,7 @@ const ExpoSecureStoreAdapter = {
       if (isWebWithLocalStorage()) {
         localStorage.setItem(key, value);
       } else {
-        await SecureStore.setItemAsync(key, value);
+        await getNativeStorage().setItemAsync(key, value);
       }
     } catch (error) {
       console.error('Error setting item in secure store:', error);
@@ -44,7 +46,7 @@ const ExpoSecureStoreAdapter = {
       if (isWebWithLocalStorage()) {
         localStorage.removeItem(key);
       } else {
-        await SecureStore.deleteItemAsync(key);
+        await getNativeStorage().deleteItemAsync(key);
       }
     } catch (error) {
       console.error('Error removing item from secure store:', error);
@@ -177,9 +179,9 @@ export const storeSessionTokens = async (session: Session | null): Promise<void>
         localStorage.setItem(REFRESH_TOKEN_KEY, session.refresh_token);
       }
     } else {
-      await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, session.access_token);
+      await getNativeStorage().setItemAsync(ACCESS_TOKEN_KEY, session.access_token);
       if (session.refresh_token) {
-        await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, session.refresh_token);
+        await getNativeStorage().setItemAsync(REFRESH_TOKEN_KEY, session.refresh_token);
       }
     }
   } catch (error) {
@@ -192,7 +194,7 @@ export const getStoredAccessToken = async (): Promise<string | null> => {
     if (isWebWithLocalStorage()) {
       return localStorage.getItem(ACCESS_TOKEN_KEY);
     }
-    return await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+    return await getNativeStorage().getItemAsync(ACCESS_TOKEN_KEY);
   } catch (error) {
     console.error('Error reading stored access token:', error);
     return null;
@@ -205,8 +207,8 @@ export const clearStoredTokens = async (): Promise<void> => {
       localStorage.removeItem(ACCESS_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
     } else {
-      await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
-      await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
+      await getNativeStorage().deleteItemAsync(ACCESS_TOKEN_KEY);
+      await getNativeStorage().deleteItemAsync(REFRESH_TOKEN_KEY);
     }
   } catch (error) {
     console.error('Error clearing stored tokens:', error);

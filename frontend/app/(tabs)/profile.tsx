@@ -69,6 +69,13 @@ export default function ProfileScreen() {
       } catch (syncError) {
         console.error('Invitation post-action sync failed:', syncError);
       }
+
+      Alert.alert(
+        'Sucesso',
+        action === 'accept'
+          ? 'Convite aceite com sucesso.'
+          : 'Convite rejeitado com sucesso.',
+      );
     } catch (error) {
       Alert.alert('Erro', getHumanReadableError(error, {
         defaultMessage: 'Não foi possível processar o convite.',
@@ -197,7 +204,7 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  content: { padding: 16 },
+  content: { padding: 16, paddingBottom: 32 },
   header: { alignItems: 'center', marginBottom: 24, paddingTop: 16 },
   avatar: {
     width: 100,

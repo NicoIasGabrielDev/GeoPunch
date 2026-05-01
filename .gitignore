@@ -31,6 +31,10 @@ dist/
 dist
 
 # Environment files (comprehensive coverage)
+.env
+.env.*
+*.env
+*.env.*
 
 *token.json*
 *credentials.json*
@@ -66,6 +70,8 @@ agenthub/agents/youtube/db
 
 # Archive files and large assets
 **/*.zip
+**/*.apk
+**/*.apks
 **/*.tar.gz
 **/*.tar
 **/*.tgz
@@ -77,15 +83,6 @@ agenthub/agents/youtube/db
 .cache/
 
 # Mobile development
-android-sdk/ -e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment files
-*.env
-*.env.*
--e 
-# Environment files
-*.env
-*.env.*
+android-sdk/
+frontend/tmp_apks*/
+frontend/tmp_universal*/

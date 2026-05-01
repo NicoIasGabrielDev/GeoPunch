@@ -17,6 +17,20 @@ if (!BACKEND_URL && !isScreenshotSeedEnabled) {
 }
 
 const baseUrl = (BACKEND_URL ?? 'https://demo.local').replace(/\/$/, '');
+
+if (!__DEV__ && !isScreenshotSeedEnabled) {
+  try {
+    const parsedBackendUrl = new URL(baseUrl);
+    if (parsedBackendUrl.protocol !== 'https:') {
+      throw new Error('Production backend URL must use HTTPS.');
+    }
+  } catch (error) {
+    throw error instanceof Error
+      ? error
+      : new Error('Invalid production backend URL.');
+  }
+}
+
 const BACKEND_TIMEOUT_MS = 90000;
 const BACKEND_WAKE_TIMEOUT_MS = 75000;
 const BACKEND_READY_TTL_MS = 8 * 60 * 1000;

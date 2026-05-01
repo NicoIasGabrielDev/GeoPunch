@@ -13,12 +13,6 @@
       "bundleIdentifier": "com.geopunch.app",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "GeoPunch precisa da sua localização para verificar presença no local de trabalho e registar ponto.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "GeoPunch precisa de acesso contínuo à localização para notificações automáticas de entrada e saída do trabalho.",
-        "NSLocationAlwaysUsageDescription": "GeoPunch precisa de acesso contínuo à localização para notificações automáticas de entrada e saída do trabalho.",
-        "UIBackgroundModes": [
-          "location",
-          "fetch"
-        ],
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -46,8 +40,6 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "GeoPunch precisa de acesso contínuo à localização para notificações automáticas de entrada e saída do trabalho.",
-          "locationAlwaysPermission": "GeoPunch precisa de acesso contínuo à localização para notificações automáticas de entrada e saída do trabalho.",
           "locationWhenInUsePermission": "GeoPunch precisa da sua localização para verificar presença no local de trabalho e registar ponto.",
           "isAndroidBackgroundLocationEnabled": false,
           "isAndroidForegroundServiceEnabled": false

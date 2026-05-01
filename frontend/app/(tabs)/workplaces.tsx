@@ -4,6 +4,8 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
   RefreshControl,
   TouchableOpacity,
   Modal,
@@ -628,15 +630,26 @@ export default function WorkplacesScreen() {
             </View>
           )}
           
-          {wizardStep === 2 ? (
-            <View style={{ flex: 1 }}>
-              {renderWizardStep()}
-            </View>
-          ) : (
-            <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-              {renderWizardStep()}
-            </ScrollView>
-          )}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.wizardBody}
+          >
+            {wizardStep === 2 ? (
+              <ScrollView
+                contentContainerStyle={styles.locationStepScrollContent}
+                keyboardShouldPersistTaps="handled"
+              >
+                {renderWizardStep()}
+              </ScrollView>
+            ) : (
+              <ScrollView
+                contentContainerStyle={styles.wizardStepScrollContent}
+                keyboardShouldPersistTaps="handled"
+              >
+                {renderWizardStep()}
+              </ScrollView>
+            )}
+          </KeyboardAvoidingView>
           
           {wizardStep > 1 && !editingWorkplace && (
             <TouchableOpacity
@@ -686,6 +699,7 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingTop: 8,
+    paddingBottom: 32,
   },
   emptyContainer: {
     alignItems: 'center',
@@ -833,6 +847,17 @@ const styles = StyleSheet.create({
   wizardContent: {
     padding: 20,
     flex: 1,
+  },
+  wizardBody: {
+    flex: 1,
+  },
+  wizardStepScrollContent: {
+    flexGrow: 1,
+    paddingBottom: 16,
+  },
+  locationStepScrollContent: {
+    flexGrow: 1,
+    paddingBottom: 16,
   },
   wizardTitle: {
     fontSize: 24,

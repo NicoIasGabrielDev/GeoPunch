@@ -17,6 +17,8 @@ interface ButtonProps {
   size?: 'small' | 'medium' | 'large';
   style?: ViewStyle;
   textStyle?: TextStyle;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
 }
 
 export const Button: React.FC<ButtonProps> = ({
@@ -28,9 +30,11 @@ export const Button: React.FC<ButtonProps> = ({
   size = 'medium',
   style,
   textStyle,
+  accessibilityLabel,
+  accessibilityHint,
 }) => {
   const getBackgroundColor = () => {
-    if (disabled) return '#ccc';
+    if (disabled) return '#e5e7eb';
     switch (variant) {
       case 'primary':
         return '#1a73e8';
@@ -48,6 +52,7 @@ export const Button: React.FC<ButtonProps> = ({
   };
 
   const getTextColor = () => {
+    if (disabled) return '#4b5563';
     if (variant === 'outline') return '#1a73e8';
     return '#fff';
   };
@@ -75,6 +80,10 @@ export const Button: React.FC<ButtonProps> = ({
       onPress={onPress}
       disabled={disabled || loading}
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? title}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{ disabled: disabled || loading, busy: loading }}
     >
       {loading ? (
         <ActivityIndicator color={getTextColor()} />
